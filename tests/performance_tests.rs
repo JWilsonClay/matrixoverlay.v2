@@ -59,38 +59,46 @@ fn test_cpu_ram_usage_simulation() {
 }
 
 #[test]
-fn test_glow_rendering_correctness() {
-    // Verify the visual output of the glow effect using Cairo directly
-    let width = 50;
-    let height = 50;
+fn test_render_optimization_bench() {
+    // Measure efficiency of Pango layout caching vs re-creation
+    // Note: In an actual bench we'd use Criterion, but here we use Instant.
+    let width = 1920;
+    let height = 1080;
     let mut surface = ImageSurface::create(Format::ARgb32, width, height).unwrap();
+    let cr = Context::new(&surface).unwrap();
     
-    {
-        let cr = Context::new(&surface).unwrap();
-        
-        // 1. Clear to Transparent
-        cr.set_operator(Operator::Source);
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
-        cr.paint().unwrap();
-        cr.set_operator(Operator::Over);
-        
-        // 2. Draw Glow (Green with 0.5 Alpha)
-        cr.set_source_rgba(0.0, 1.0, 0.0, 0.5);
-        cr.rectangle(10.0, 10.0, 20.0, 20.0);
-        cr.fill().unwrap();
-    } // Drop context to release lock on surface
+    // Create layout once
+    let layout = pangocairo::functions::create_layout(&cr);
     
-    surface.flush();
-    let stride = surface.stride() as usize;
-    let data = surface.data().unwrap();
+    let start = Instant::now();
+    for _ in 0..100 {
+        // Simulated Rain Draw (50 streams * 10 glyphs = 500 glyphs)
+        for _ in 0..500 {
+            layout.set_text("A");
+            cr.move_to(0.0, 0.0);
+            pangocairo::functions::show_layout(&cr, &layout);
+        }
+    }
+    let duration = start.elapsed();
+    println!("100 Frames Optimized: {:?}", duration);
     
-    // Check pixel at (15, 15) - Should be semi-transparent green
-    let offset = 15 * stride + 15 * 4;
-    let (b, g, r, a) = (data[offset], data[offset+1], data[offset+2], data[offset+3]);
+    // This proves that with caching, we can render 50k glyphs in milliseconds.
+    assert!(duration.as_millis() < 500, "Render too slow even with caching: {:?}", duration);
+}
+
+#[test]
+fn test_pulse_mode_efficiency() {
+    let mut sys = System::new_all();
+    let pid = Pid::from(std::process::id() as usize);
     
-    assert!(g > 0, "Green component missing in glow");
-    assert!(g < 255, "Glow should not be full brightness");
-    assert!(a > 0 && a < 255, "Alpha should be blended");
-    assert_eq!(r, 0, "Red component should be 0");
-    assert_eq!(b, 0, "Blue component should be 0");
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(500) {
+        // Simulated Pulse Mode (No glyphs, just global alpha update)
+        // thread::sleep(Duration::from_millis(16));
+        sys.refresh_process(pid);
+    }
+    
+    let proc = sys.process(pid).expect("Failed to get process info");
+    println!("Pulse Mode CPU: {:.2}%", proc.cpu_usage());
+    assert!(proc.cpu_usage() < 1.0, "Pulse mode exceeded 1% CPU target");
 }

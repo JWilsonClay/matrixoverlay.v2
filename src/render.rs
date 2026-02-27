@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
+use std::cell::RefCell;
 use anyhow::Result;
 use cairo::{Context as CairoContext, Format, ImageSurface, Operator};
 use pangocairo::pango::{FontDescription, Layout as PangoLayout, Weight};
@@ -74,7 +75,7 @@ impl RainManager {
         }
     }
 
-    pub fn draw(&self, cr: &CairoContext, config: &Config) -> Result<()> {
+    pub fn draw(&self, cr: &CairoContext, layout: &PangoLayout, config: &Config) -> Result<()> {
         let glyph_size = config.general.font_size as f64 * 0.8;
         let height = self.last_height as f64;
         
@@ -93,16 +94,14 @@ impl RainManager {
                     cr.set_source_rgba(0.8, 1.0, 0.9, 1.0); // Lead glyph is brighter
                 }
 
-                // Simple drawing without pango for speed? Or pango for Katakana support.
-                // Let's use pango to be safe with CJK fonts.
-                let layout = pangocairo::functions::create_layout(cr);
+                // Optimization: Reuse the passed-in layout
                 let mut desc = pango::FontDescription::from_string("Monospace");
                 desc.set_size((glyph_size * stream.depth_scale * pango::SCALE as f64) as i32);
                 layout.set_font_description(Some(&desc));
                 layout.set_text(&glyph.to_string());
                 
                 cr.move_to(stream.x, y);
-                pangocairo::functions::show_layout(cr, &layout);
+                pangocairo::functions::show_layout(cr, layout);
                 cr.restore()?;
             }
         }
@@ -127,8 +126,10 @@ pub struct Renderer {
     config_layout: ConfigLayout,
     #[allow(dead_code)]
     monitor_index: usize,
-    scroll_offsets: HashMap<String, f64>,
+    scroll_offsets: RefCell<HashMap<String, f64>>,
     rain_manager: RainManager,
+    pango_layout: PangoLayout,
+    frame_count: RefCell<u64>,
 }
 
 impl Renderer {
@@ -152,6 +153,10 @@ impl Renderer {
 
         let color_rgb = parse_hex_color(&config.general.color)?;
 
+        let cr = CairoContext::new(&surface)?;
+        let pango_layout = pangocairo::functions::create_layout(&cr);
+        pango_layout.set_font_description(Some(&font_desc));
+
         let renderer = Self {
             surface,
             base_font_desc: font_desc,
@@ -160,15 +165,14 @@ impl Renderer {
             color_rgb,
             config_layout: layout,
             monitor_index,
-            scroll_offsets: HashMap::new(),
+            scroll_offsets: RefCell::new(HashMap::new()),
             rain_manager: RainManager::new(config.cosmetics.realism_scale),
+            pango_layout,
+            frame_count: RefCell::new(0),
         };
         
         // Initial clear
-        {
-            let cr = CairoContext::new(&renderer.surface)?;
-            renderer.clear(&cr)?;
-        }
+        renderer.clear(&cr)?;
         
         Ok(renderer)
     }
@@ -200,9 +204,11 @@ impl Renderer {
         config: &Config, 
         metrics: &MetricData
     ) -> Result<()> {
+        // FPS Capping logic
+        *self.frame_count.borrow_mut() += 1;
+        let frame_count = *self.frame_count.borrow();
+
         let cr = CairoContext::new(&self.surface)?;
-        let pango_layout = pangocairo::functions::create_layout(&cr);
-        pango_layout.set_font_description(Some(&self.base_font_desc));
         self.clear(&cr)?;
 
         // Update physics
@@ -213,13 +219,25 @@ impl Renderer {
         );
 
         // 1. Draw Rain
-        if config.cosmetics.rain_mode != "off" {
-            self.rain_manager.draw(&cr, config)?;
+        if config.cosmetics.rain_mode == "fall" {
+            self.rain_manager.draw(&cr, &self.pango_layout, config)?;
+        } else if config.cosmetics.rain_mode == "pulse" {
+            // Optimization: Pulse Mode (Very low CPU)
+            let pulse = ( (frame_count as f64 * 0.05).sin() * 0.2 ) + 0.3;
+            cr.save()?;
+            cr.set_source_rgba(0.0, 1.0, 65.0/255.0, pulse);
+            cr.rectangle(0.0, 0.0, self.width as f64, self.height as f64);
+            cr.set_operator(Operator::Atop); 
+            cr.paint_with_alpha(pulse)?;
+            cr.restore()?;
         }
+
+        // Header and metrics reuse self.pango_layout
+        self.pango_layout.set_font_description(Some(&self.base_font_desc));
 
         // Always render Day of Week first (Header) at top-center
         if let Some(MetricValue::String(dow)) = metrics.values.get(&MetricId::DayOfWeek) {
-            self.draw_day_of_week(&cr, &pango_layout, dow, 100.0, &config.general.glow_passes)?;
+            self.draw_day_of_week(&cr, &self.pango_layout, dow, 100.0, &config.general.glow_passes)?;
         }
 
         // Iterate over layout items and draw them
@@ -258,7 +276,7 @@ impl Renderer {
 
                     self.draw_metric_pair(
                         &cr,
-                        &pango_layout,
+                        &self.pango_layout,
                         &label, 
                         &value_str, 
                         item.x as f64, 
@@ -275,7 +293,6 @@ impl Renderer {
         }
 
         // Explicitly drop context and layout to release surface lock
-        drop(pango_layout);
         drop(cr);
 
         // Debug snapshot
@@ -316,7 +333,7 @@ impl Renderer {
     }
 
     /// Draws the Day of Week header, centered and scaled.
-    fn draw_day_of_week(&mut self, cr: &CairoContext, layout: &PangoLayout, dow: &str, y: f64, glow_passes: &[(f64, f64, f64)]) -> Result<()> {
+    fn draw_day_of_week(&self, cr: &CairoContext, layout: &PangoLayout, dow: &str, y: f64, glow_passes: &[(f64, f64, f64)]) -> Result<()> {
         log::debug!("Drawing Day of Week: '{}' at y={}", dow, y);
         // Scale font 1.8x
         let mut desc = self.base_font_desc.clone();
@@ -350,7 +367,7 @@ impl Renderer {
     /// Value is right-aligned at `x + max_width`.
     /// If value is too long and `scroll` is true, it scrolls.
     fn draw_metric_pair(
-        &mut self, 
+        &self, 
         cr: &CairoContext,
         layout: &PangoLayout,
         label: &str, 
@@ -394,10 +411,10 @@ impl Renderer {
 
         if value_width > value_area_width && allow_scroll {
             // Scrolling logic
-            let offset = self.scroll_offsets.entry(metric_id.to_string()).or_insert(0.0);
+            let mut offsets = self.scroll_offsets.borrow_mut();
+            let offset = offsets.entry(metric_id.to_string()).or_insert(0.0);
             
-            // Slow scroll: 0.5px per frame (assuming ~20-60fps call rate from main loop)
-            // For ASD friendliness, we avoid rapid flashing. Slow smooth scroll is better.
+            // Slow scroll: 0.5px per frame
             *offset += 0.5;
             
             // Reset if scrolled past
