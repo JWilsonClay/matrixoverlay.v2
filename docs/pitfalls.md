@@ -1,12 +1,10 @@
 # Hardware Notes & Pitfalls: Dell G15 5515
 
-## Hardware Specifics
+## 1. Hardware Specifics
 **Target System**: Dell G15 5515 (Ryzen 7 5800H + RTX 3050 Ti Mobile + AMD iGPU)
 
 ### CPU: AMD Ryzen 7 5800H
 - **Driver**: `k10temp` kernel module.
-- **Hwmon Path**: Typically `/sys/class/hwmon/hwmon*/name` contains `k10temp`.
-- **Sensors**:
   - `temp1_input` (Tctl): Instantaneous temperature, erratic.
   - `temp2_input` (Tdie): Die temperature, generally more stable.
 - **Fans**: Dell laptops often hide fan control/sensing from standard `hwmon`. Requires `dell-smm-hwmon` module, but often conflicts with BIOS fan control. If `/sys/class/hwmon/hwmon*/fan1_input` is missing, fan stats may be unavailable without `i8kutils`.

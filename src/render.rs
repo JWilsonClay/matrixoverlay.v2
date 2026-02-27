@@ -12,18 +12,32 @@ use crate::config::Config;
 use crate::layout::Layout as ConfigLayout;
 use crate::metrics::{MetricData, MetricId, MetricValue};
 
+/// Represents a single falling stream of glyphs in the Matrix rain.
 pub struct RainStream {
+    /// Horizontal position of the stream.
     pub x: f64,
+    /// Vertical position of the lead glyph.
     pub y: f64,
+    /// Vertical falling speed.
     pub speed: f64,
+    /// List of characters (glyphs) currently in the stream.
     pub glyphs: Vec<char>,
+    /// Scaling factor for depth (parallax) effect.
     pub depth_scale: f64,
 }
 
+/// Manages the physics and state of the Matrix rain effect.
+///
+/// Ties to Stage 0: Matrix Aesthetics. Implements a multi-layered parallax
+/// effect with Katakana glyphs.
 pub struct RainManager {
+    /// Collection of active rain streams.
     pub streams: Vec<RainStream>,
+    /// Density of the rain effect (0-10).
     pub realism_scale: u32,
+    /// Last known width of the rendering surface.
     pub last_width: i32,
+    /// Last known height of the rendering surface.
     pub last_height: i32,
 }
 
@@ -115,20 +129,32 @@ fn random_katakana() -> char {
 }
 
 /// Handles drawing to an offscreen surface and presenting it to the X11 window.
+/// Main rendering engine for the Matrix Overlay.
+///
+/// Handles Cairo surface management, Pango layout caching, and drawing
+/// both the Matrix rain and the system metrics.
 pub struct Renderer {
-    surface: ImageSurface,
-    base_font_desc: FontDescription,
-    width: i32,
-    height: i32,
-    color_rgb: (f64, f64, f64),
-    
-    // Layout & State
+    /// The target Cairo image surface.
+    pub surface: ImageSurface,
+    /// Default font description used for metrics.
+    pub base_font_desc: FontDescription,
+    /// Width of the renderer's surface.
+    pub width: i32,
+    /// Height of the renderer's surface.
+    pub height: i32,
+    /// Base color for rendering (from config).
+    pub color_rgb: (f64, f64, f64),
+    /// Layout configuration from config.json.
     config_layout: ConfigLayout,
     #[allow(dead_code)]
     monitor_index: usize,
+    /// Map of metric IDs to their current scroll offset (for long text).
     scroll_offsets: RefCell<HashMap<String, f64>>,
+    /// manager for the background rain effect.
     rain_manager: RainManager,
+    /// Cached Pango layout to avoid expensive re-creation.
     pango_layout: PangoLayout,
+    /// Monotonically increasing frame counter for animations.
     frame_count: RefCell<u64>,
 }
 

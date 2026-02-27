@@ -1,12 +1,3 @@
-# Testing Results & Deployment Report
-
-## 1. Test Execution Summary
-
-| Category | Test Suite | Status | Notes |
-|----------|------------|--------|-------|
-| **Hardware** | `tests/hardware_tests.rs` | PASS | Verified on Ryzen 5800H + RTX 3050 Ti. |
-| **Performance** | `tests/performance_tests.rs` | PASS | Latency < 50ms, CPU < 1%. |
-| **Windowing** | `tests/window_integration.rs` | PASS | Layering & Click-through verified via X11 atoms. |
 | **Metrics** | `tests/metrics_tests.rs` | PASS | Sysinfo & Hwmon parsers validated. |
 | **ASD Compliance** | Manual / Visual | PASS | No strobing, contrast > 7:1 confirmed. |
 
