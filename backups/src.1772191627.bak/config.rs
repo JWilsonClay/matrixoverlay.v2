@@ -12,13 +12,9 @@ pub struct General {
     pub font_size: u32,
     pub color: String,
     pub update_ms: u64,
-    #[serde(default = "default_theme")]
-    pub theme: String,
     #[serde(default = "default_glow_passes")]
     pub glow_passes: Vec<(f64, f64, f64)>,
 }
-
-fn default_theme() -> String { "classic".to_string() }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Screen {
@@ -115,7 +111,6 @@ impl Default for Config {
                 font_size: 14,
                 color: "#00FF41".to_string(),
                 update_ms: 1000,
-                theme: "classic".to_string(),
                 glow_passes: default_glow_passes(),
             },
             screens: vec![

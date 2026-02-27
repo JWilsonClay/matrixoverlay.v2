@@ -1008,15 +1008,6 @@ fn init_collectors(config: &Config, sys_manager: Arc<Mutex<SysinfoManager>>) -> 
     if required_metrics.contains(&MetricId::NetworkDetails) {
         collectors.push(Box::new(NetworkCollector::new()));
     }
-    if required_metrics.contains(&MetricId::DiskUsage) {
-        collectors.push(Box::new(DiskCollector::new(sys_manager.clone())));
-    }
-    if required_metrics.contains(&MetricId::CpuTemp) || required_metrics.contains(&MetricId::FanSpeed) {
-        collectors.push(Box::new(HwmonCollector::new()));
-    }
-    if required_metrics.contains(&MetricId::GpuTemp) || required_metrics.contains(&MetricId::GpuUtil) {
-        collectors.push(Box::new(NvidiaSmiCollector::new()));
-    }
     if !config.productivity.repos.is_empty() {
         collectors.push(Box::new(GitCollector::new(config.productivity.repos.clone())));
     }

@@ -1,0 +1,24 @@
+{
+  "general": {
+    "font_size": 14,
+    "color": "#00FF41",
+    "update_ms": 1000
+  },
+  "screens": [
+    {
+      "metrics": ["cpu_usage", "ram_usage", "gpu_temp"],
+      "x_offset": 20,
+      "y_offset": 120
+    },
+    {
+      "metrics": ["network_details", "disk_usage", "weather_temp"],
+      "x_offset": 80,
+      "y_offset": 120
+    }
+  ],
+  "weather": {
+    "lat": 37.77,
+    "lon": -122.41,
+    "enabled": false
+  }
+}

@@ -1,0 +1,137 @@
+DEBUGGER SESSION START: 2026-02-27 09:45:30
+Targeting Hypothesis in: /home/jwils/matrixoverlay.v2/CurrentProgramTrajectory.md
+
+=== Project Structure Fix ===
+No .rs files found in root to move.
+
+$ ls -F src/
+config.rs
+layout.rs
+lib.rs
+main.rs
+metrics.rs
+nvidia_mock.txt
+path_utils.rs
+render.rs
+timer.rs
+tray.rs
+window.rs
+
+
+$ ls -F benches/
+render_bench.rs
+
+
+$ cargo build --release
+    Finished `release` profile [optimized] target(s) in 0.14s
+
+
+$ cargo test --all-targets
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running unittests src/lib.rs (target/debug/deps/matrix_overlay-034438dd129be281)
+
+running 7 tests
+test metrics::tests::test_path_traversal_blocked ... ok
+test metrics::tests::test_git_rotation_batching_cap ... ok
+test render::tests::test_rain_stream_reset ... ok
+test render::tests::test_rain_manager_scale_density ... ok
+test metrics::tests::test_git_delta_accuracy_24h_rolling ... ok
+test metrics::tests::test_hwmon_collector_ryzen_cpu ... ok
+test metrics::tests::test_open_meteo_collector ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running unittests src/main.rs (target/debug/deps/matrix_overlay-a75954e61943f926)
+
+running 7 tests
+test metrics::tests::test_path_traversal_blocked ... ok
+test metrics::tests::test_git_rotation_batching_cap ... ok
+test render::tests::test_rain_stream_reset ... ok
+test render::tests::test_rain_manager_scale_density ... ok
+test metrics::tests::test_hwmon_collector_ryzen_cpu ... ok
+test metrics::tests::test_git_delta_accuracy_24h_rolling ... ok
+test metrics::tests::test_open_meteo_collector ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/asd_tests.rs (target/debug/deps/asd_tests-e21c89ddf04df2de)
+
+running 5 tests
+test test_asd_readability_defaults ... ok
+test test_high_contrast_ratio ... ok
+test test_layout_predictability ... ok
+test test_safe_zones_and_offsets ... ok
+test test_stability_no_flicker ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/hardware_tests.rs (target/debug/deps/hardware_tests-3ef3e531c993f01b)
+
+running 6 tests
+test test_amd_igpu_detection ... ok
+test test_fan_readings ... ok
+test test_nvidia_gpu_access ... ok
+test test_high_cpu_load_resilience ... ok
+test test_high_disk_io_resilience ... ok
+test test_window_position_stability ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+
+     Running tests/metrics_tests.rs (target/debug/deps/metrics_tests-84d1fcacf449f4b2)
+
+running 5 tests
+test test_nvidia_collector_parsing ... ok
+test test_open_meteo_collector ... ok
+test test_hwmon_collector_fan ... ok
+test test_hwmon_collector_ryzen_cpu ... ok
+test test_sysinfo_collector_defaults ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running tests/performance_tests.rs (target/debug/deps/performance_tests-74d1e95623f0cfec)
+
+running 4 tests
+test test_render_optimization_bench ... ok
+test test_update_latency_accuracy ... ok
+test test_pulse_mode_efficiency ... ok
+test test_cpu_ram_usage_simulation ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.83s
+
+     Running tests/window_integration.rs (target/debug/deps/window_integration-b2e4bd389d1c3875)
+
+running 3 tests
+test test_click_through_input_shape ... ok
+test test_geometry_and_visual ... ok
+test test_window_properties_and_atoms ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running benches/render_bench.rs (target/debug/deps/render_bench-68f063e9dbf5b21b)
+Gnuplot not found, using plotters backend
+Testing render_text_with_glow
+Success
+
+
+
+=== Runtime Verification ===
+$ RUST_LOG=info ./target/release/matrix-overlay
+[2026-02-27T15:45:33Z INFO  matrix_overlay] Initializing Matrix Overlay...
+[2026-02-27T15:45:33Z INFO  matrix_overlay] Configuration loaded successfully.
+[2026-02-27T15:45:33Z INFO  matrix_overlay] Monitor 0: Configured metrics: ["cpu_usage", "ram_usage", "gpu_temp"]
+[2026-02-27T15:45:33Z INFO  matrix_overlay] Monitor 1: Configured metrics: ["network_details", "disk_usage", "weather_temp"]
+[2026-02-27T15:45:33Z INFO  matrix_overlay] Weather disabled (Privacy Mode active)
+[2026-02-27T15:45:33Z INFO  matrix_overlay] Connected to XCB. Screen: 0
+[2026-02-27T15:45:33Z INFO  matrix_overlay::window] Detected 2 active monitors
+[2026-02-27T15:45:33Z INFO  matrix_overlay::window]   - eDP (ID: 82): 1920x1080@120Hz at 0,0
+[2026-02-27T15:45:33Z INFO  matrix_overlay::window]   - HDMI-1-0 (ID: 475): 1920x1080@60Hz at 1920,0
+[2026-02-27T15:45:33Z INFO  matrix_overlay] Created 2 overlay windows.
+[2026-02-27T15:45:33Z INFO  matrix_overlay]   Window 0: ID=Window { res_id: 81788929 }, Monitor=eDP
+[2026-02-27T15:45:33Z INFO  matrix_overlay]   Window 1: ID=Window { res_id: 81788931 }, Monitor=HDMI-1-0
+[2026-02-27T15:45:33Z INFO  matrix_overlay] Setting background to black...
+[2026-02-27T15:45:33Z INFO  matrix_overlay] Grabbed hotkeys: Ctrl+Alt+W (Toggle), Ctrl+Alt+Q (Quit)
+[2026-02-27T15:45:33Z INFO  matrix_overlay] Entering event loop...
+[2026-02-27T15:45:33Z ERROR matrix_overlay] XCB Wait Error: xcb protocol error
+[2026-02-27T15:45:33Z INFO  matrix_overlay] Shutting down...
+
+[Process exited with code 0]

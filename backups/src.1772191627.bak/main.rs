@@ -10,15 +10,14 @@ mod window;
 mod timer;
 mod path_utils;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::sync::{Arc, atomic::Ordering};
 use std::process::Command;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::env;
 use std::fs;
 use std::path::Path;
-use git2::Repository;
 use crossbeam_channel::{unbounded, bounded, select};
 use tray_icon::menu::MenuEvent;
 use xcb::x;
@@ -28,7 +27,7 @@ use crate::window::create_all_windows;
 use crate::metrics::{MetricData, MetricId, MetricValue, MetricsCommand, spawn_metrics_thread};
 use crate::render::Renderer;
 use crate::layout::Layout;
-use crate::tray::{SystemTray, MENU_QUIT_ID, MENU_RELOAD_ID, MENU_EDIT_ID, MENU_THEME_CLASSIC, MENU_THEME_CALM, MENU_THEME_ALERT, MENU_TOGGLE_AUTO_COMMIT, MENU_TOGGLE_OLLAMA};
+use crate::tray::{SystemTray, MENU_QUIT_ID, MENU_RELOAD_ID, MENU_EDIT_ID};
 
 fn main() -> Result<()> {
     // 1. Init env_logger
@@ -151,11 +150,8 @@ fn main() -> Result<()> {
                 Ok(event) => {
                     if xcb_tx.send(event).is_err() { break; }
                 }
-                Err(xcb::Error::Protocol(e)) => {
-                    log::warn!("XCB Protocol Error (Ignored): {}", e);
-                }
                 Err(e) => {
-                    log::error!("XCB Connection Error: {}", e);
+                    log::error!("XCB Wait Error: {}", e);
                     break; 
                 }
             }
@@ -170,27 +166,6 @@ fn main() -> Result<()> {
             thread::sleep(Duration::from_millis(update_ms));
             if tick_tx.send(()).is_err() { break; }
         }
-    });
-
-    // 7c. Spawn Productivity Thread (Auto-Commits & AI Insights)
-    let productivity_config = config.clone();
-    let productivity_shutdown = shutdown.clone();
-    thread::spawn(move || {
-        log::info!("Productivity thread started.");
-        let mut last_commit_check = Instant::now();
-        
-        while !productivity_shutdown.load(Ordering::Relaxed) {
-            // Run commit check every hour
-            if last_commit_check.elapsed() >= Duration::from_secs(3600) {
-                last_commit_check = Instant::now();
-                if let Err(e) = run_auto_commit_cycle(&productivity_config) {
-                    log::error!("Auto-commit cycle failed: {}", e);
-                }
-            }
-            
-            thread::sleep(Duration::from_secs(60));
-        }
-        log::info!("Productivity thread stopped.");
     });
 
     let mut visible = true;
@@ -302,26 +277,6 @@ fn main() -> Result<()> {
                             let _ = Command::new("xdg-open").arg(format!("{}/.config/matrix-overlay/config.json", home)).spawn();
                         }
                     }
-                    if event.id.as_ref().starts_with("theme_") {
-                        let new_theme = match event.id.as_ref() {
-                            MENU_THEME_CALM => "calm",
-                            MENU_THEME_ALERT => "alert",
-                            _ => "classic",
-                        };
-                        log::info!("Switching theme to: {}", new_theme);
-                        config.general.theme = new_theme.to_string();
-                        for renderer in &mut renderers {
-                            renderer.update_config(config.clone());
-                        }
-                    }
-                    if event.id.as_ref() == MENU_TOGGLE_AUTO_COMMIT {
-                        config.productivity.auto_commit_threshold = if config.productivity.auto_commit_threshold > 0 { 0 } else { 1000 };
-                        log::info!("Auto-Commit toggled. Threshold: {}", config.productivity.auto_commit_threshold);
-                    }
-                    if event.id.as_ref() == MENU_TOGGLE_OLLAMA {
-                        config.productivity.ollama_enabled = !config.productivity.ollama_enabled;
-                        log::info!("Ollama AI Summaries toggled: {}", config.productivity.ollama_enabled);
-                    }
                 }
             }
         }
@@ -395,7 +350,7 @@ fn grab_key_combinations(conn: &xcb::Connection, root: x::Window, keycode: u8, b
     ];
 
     for &mods in &modifiers {
-        let cookie = conn.send_request_checked(&x::GrabKey {
+        conn.send_request(&x::GrabKey {
             owner_events: true,
             grab_window: root,
             modifiers: mods,
@@ -403,115 +358,6 @@ fn grab_key_combinations(conn: &xcb::Connection, root: x::Window, keycode: u8, b
             pointer_mode: x::GrabMode::Async,
             keyboard_mode: x::GrabMode::Async,
         });
-        if let Err(e) = conn.check_request(cookie) {
-            log::warn!("Failed to grab hotkey (keycode {}, mod {:?}): {}", keycode, mods, e);
-        }
     }
     Ok(())
-}
-
-fn run_auto_commit_cycle(config: &Config) -> Result<()> {
-    log::info!("Starting auto-commit cycle for {} repos...", config.productivity.repos.len());
-    
-    for repo_path in &config.productivity.repos {
-        let path = Path::new(repo_path);
-        if !crate::path_utils::is_safe_path(path) {
-            log::warn!("Skipping unsafe repo path: {}", repo_path);
-            continue;
-        }
-
-        match Repository::open(path) {
-            Ok(repo) => {
-                if let Err(e) = handle_repo_auto_commit(&repo, config) {
-                    log::error!("Failed to auto-commit in {}: {}", repo_path, e);
-                }
-            }
-            Err(e) => log::warn!("Could not open repo at {}: {}", repo_path, e),
-        }
-    }
-    
-    Ok(())
-}
-
-fn handle_repo_auto_commit(repo: &Repository, config: &Config) -> Result<()> {
-    let mut index = repo.index()?;
-    let statuses = repo.statuses(None)?;
-    
-    if statuses.is_empty() {
-        return Ok(());
-    }
-
-    // Check line count threshold
-    let mut total_diff_lines = 0;
-    if let Ok(diff) = repo.diff_index_to_workdir(None, None) {
-        if let Ok(stats) = diff.stats() {
-            total_diff_lines = stats.insertions() + stats.deletions();
-        }
-    }
-
-    if total_diff_lines < config.productivity.auto_commit_threshold as usize {
-        log::debug!("Skipping auto-commit: {} lines < {} threshold", total_diff_lines, config.productivity.auto_commit_threshold);
-        return Ok(());
-    }
-
-    // Stage all changes
-    index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
-    index.write()?;
-    let tree_id = index.write_tree()?;
-    let tree = repo.find_tree(tree_id)?;
-
-    let parent_commit = repo.head()?.peel_to_commit()?;
-    let sig = repo.signature()?;
-
-    let message = if config.productivity.ollama_enabled {
-        generate_ai_commit_message(repo).unwrap_or_else(|_| "Auto-commit (Matrix Overlay)".to_string())
-    } else {
-        "Auto-commit (Matrix Overlay)".to_string()
-    };
-
-    repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&parent_commit])?;
-    log::info!("Auto-committed to {}: {}", repo.path().display(), message);
-
-    Ok(())
-}
-
-fn generate_ai_commit_message(repo: &Repository) -> Result<String> {
-    // Basic diff for Ollama
-    let diff = repo.diff_index_to_workdir(None, None)?;
-    let mut diff_text = Vec::new();
-    diff.print(git2::DiffFormat::Patch, |_, _, line| {
-        diff_text.extend_from_slice(line.content());
-        true
-    })?;
-
-    let diff_str = String::from_utf8_lossy(&diff_text);
-    let truncated_diff = if diff_str.len() > 4000 {
-        format!("{}... [truncated]", &diff_str[..4000])
-    } else {
-        diff_str.to_string()
-    };
-
-    let prompt = format!(
-        "Generate a concise one-line git commit message for the following diff:\n\n{}",
-        truncated_diff
-    );
-
-    // Use reqwest blocking to call Ollama
-    let client = reqwest::blocking::Client::new();
-    let body = serde_json::json!({
-        "model": "qwen2.5-coder:7b-instruct-q5_K_M",
-        "prompt": prompt,
-        "stream": false
-    });
-
-    let res = client.post("http://localhost:11434/api/generate")
-        .json(&body)
-        .send()?
-        .json::<serde_json::Value>()?;
-
-    if let Some(msg) = res["response"].as_str() {
-        Ok(msg.trim().trim_matches('"').to_string())
-    } else {
-        bail!("Failed to get message from Ollama")
-    }
 }

@@ -103,19 +103,9 @@ impl RainManager {
                 let alpha = alpha.clamp(0.0, 1.0);
 
                 cr.save()?;
-                let (r, g, b) = match config.general.theme.as_str() {
-                    "calm" => (0.0, 0.8, 1.0),
-                    "alert" => (1.0, 0.2, 0.2),
-                    _ => (0.0, 1.0, 65.0/255.0), // classic
-                };
-                cr.set_source_rgba(r, g,b, alpha * 0.4); 
+                cr.set_source_rgba(0.0, 1.0, 65.0/255.0, alpha * 0.4); // Matrix green dimmed
                 if i == 0 {
-                    let (hr, hg, hb) = match config.general.theme.as_str() {
-                        "calm" => (0.8, 0.9, 1.0),
-                        "alert" => (1.0, 0.8, 0.8),
-                        _ => (0.8, 1.0, 0.9), // classic
-                    };
-                    cr.set_source_rgba(hr, hg, hb, 1.0); // Lead glyph is brighter
+                    cr.set_source_rgba(0.8, 1.0, 0.9, 1.0); // Lead glyph is brighter
                 }
 
                 // Optimization: Reuse the passed-in layout
@@ -230,14 +220,6 @@ impl Renderer {
             config.general.font_size as f64
         );
         self.rain_manager.realism_scale = config.cosmetics.realism_scale;
-        
-        // Update color based on theme if it's one of the presets
-        self.color_rgb = match config.general.theme.as_str() {
-            "calm" => (0.0, 0.8, 1.0),
-            "alert" => (1.0, 0.2, 0.2),
-            "classic" => (0.0, 1.0, 65.0 / 255.0),
-            _ => parse_hex_color(&config.general.color).unwrap_or((0.0, 1.0, 65.0 / 255.0)),
-        };
     }
 
     /// Main draw loop.
@@ -268,13 +250,8 @@ impl Renderer {
         } else if config.cosmetics.rain_mode == "pulse" {
             // Optimization: Pulse Mode (Very low CPU)
             let pulse = ( (frame_count as f64 * 0.05).sin() * 0.2 ) + 0.3;
-            let theme_color = match config.general.theme.as_str() {
-                "calm" => (0.0, 0.8, 1.0),
-                "alert" => (1.0, 0.2, 0.2),
-                _ => (0.0, 1.0, 65.0/255.0), // classic
-            };
             cr.save()?;
-            cr.set_source_rgba(theme_color.0, theme_color.1, theme_color.2, pulse);
+            cr.set_source_rgba(0.0, 1.0, 65.0/255.0, pulse);
             cr.rectangle(0.0, 0.0, self.width as f64, self.height as f64);
             cr.set_operator(Operator::Atop); 
             cr.paint_with_alpha(pulse)?;
@@ -286,7 +263,7 @@ impl Renderer {
 
         // Always render Day of Week first (Header) at top-center
         if let Some(MetricValue::String(dow)) = metrics.values.get(&MetricId::DayOfWeek) {
-            self.draw_day_of_week(&cr, &self.pango_layout, dow, 100.0, &config.general.glow_passes, config)?;
+            self.draw_day_of_week(&cr, &self.pango_layout, dow, 100.0, &config.general.glow_passes)?;
         }
 
         // Iterate over layout items and draw them
@@ -382,7 +359,7 @@ impl Renderer {
     }
 
     /// Draws the Day of Week header, centered and scaled.
-    fn draw_day_of_week(&self, cr: &CairoContext, layout: &PangoLayout, dow: &str, y: f64, glow_passes: &[(f64, f64, f64)], config: &Config) -> Result<()> {
+    fn draw_day_of_week(&self, cr: &CairoContext, layout: &PangoLayout, dow: &str, y: f64, glow_passes: &[(f64, f64, f64)]) -> Result<()> {
         log::debug!("Drawing Day of Week: '{}' at y={}", dow, y);
         // Scale font 1.8x
         let mut desc = self.base_font_desc.clone();
@@ -401,14 +378,10 @@ impl Renderer {
         // Center horizontally in the window
         let x = (self.width as f64 - text_width) / 2.0;
         
-        // Theme-aware colors
-        let theme_color = match config.general.theme.as_str() {
-            "calm" => (0.0, 0.8, 1.0),
-            "alert" => (1.0, 0.2, 0.2),
-            _ => (0.0, 1.0, 65.0 / 255.0), // classic
-        };
+        // High-contrast green #00FF41 (R=0, G=255, B=65)
+        let matrix_green = (0.0, 1.0, 65.0 / 255.0);
         
-        self.draw_text_glow_at(cr, layout, x, y, Some(theme_color), glow_passes)?;
+        self.draw_text_glow_at(cr, layout, x, y, Some(matrix_green), glow_passes)?;
         
         // Reset font
         layout.set_font_description(Some(&self.base_font_desc));

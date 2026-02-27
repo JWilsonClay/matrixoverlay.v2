@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 use std::thread;
 use sysinfo::{Pid, ProcessExt, System, SystemExt};
-use cairo::{ImageSurface, Format, Context, Operator};
+use cairo::{ImageSurface, Format, Context};
 
 #[test]
 fn test_update_latency_accuracy() {
@@ -64,7 +64,7 @@ fn test_render_optimization_bench() {
     // Note: In an actual bench we'd use Criterion, but here we use Instant.
     let width = 1920;
     let height = 1080;
-    let mut surface = ImageSurface::create(Format::ARgb32, width, height).unwrap();
+    let surface = ImageSurface::create(Format::ARgb32, width, height).unwrap();
     let cr = Context::new(&surface).unwrap();
     
     // Create layout once
