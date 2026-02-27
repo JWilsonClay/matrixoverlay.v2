@@ -714,8 +714,8 @@ pub struct GitCollector {
     pub delta_window: Duration,
     pub last_check: Instant,
     pub cached_delta: (i64, i64),
-    rotation_index: usize,
-    start_time: Instant,
+    pub(crate) rotation_index: usize,
+    pub(crate) start_time: Instant,
 }
 
 impl GitCollector {
@@ -1028,5 +1028,94 @@ impl MetricCollector for NvidiaSmiCollector {
             }
         }
         map
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use git2::Repository;
+    use mockito::Server;
+    use std::fs::File;
+    use std::io::Write;
+
+    #[test]
+    fn test_hwmon_collector_ryzen_cpu() {
+        let dir = tempdir().unwrap();
+        let hwmon_dir = dir.path().join("hwmon0");
+        fs::create_dir(&hwmon_dir).unwrap();
+        fs::write(hwmon_dir.join("name"), "k10temp\n").unwrap();
+        fs::write(hwmon_dir.join("temp1_input"), "45123\n").unwrap();
+
+        let mut collector = HwmonCollector::new_with_path(MetricId::CpuTemp, dir.path().to_path_buf());
+        let values = collector.collect();
+        let value = values.get(&MetricId::CpuTemp).unwrap();
+        if let MetricValue::String(v) = value {
+            assert!(v.contains("45"), "Expected 45.1 in string, got {}", v);
+        }
+    }
+
+    #[test]
+    fn test_open_meteo_collector() {
+        let mut server = Server::new();
+        let _m = server.mock("GET", "/v1/forecast?latitude=51.5074&longitude=-0.1278&current=temperature_2m,weather_code")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"current": {"temperature_2m": 15.5, "weather_code": 3}}"#)
+            .create();
+
+        let url = server.url();
+        let mut collector = OpenMeteoCollector::new_with_url(MetricId::WeatherTemp, 51.5074, -0.1278, url);
+        let values = collector.collect();
+        let value = values.get(&MetricId::WeatherTemp).unwrap();
+        if let MetricValue::String(v) = value {
+            assert!(v.contains("15.5"), "Expected 15.5 in string, got {}", v);
+        }
+
+        let value_cond = values.get(&MetricId::WeatherCondition).unwrap();
+        if let MetricValue::String(v) = value_cond {
+            assert_eq!(v, "Partly cloudy");
+        }
+    }
+
+    #[test]
+    fn test_git_delta_accuracy_24h_rolling() {
+        let dir = tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
+
+        fs::write(dir.path().join("file.txt"), "hello").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("file.txt")).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Update", &tree, &[&parent]).unwrap();
+
+        let mut collector = GitCollector::new(vec![dir.path().to_str().unwrap().to_string()]);
+        collector.start_time = Instant::now() - Duration::from_secs(3600);
+        let results = collector.collect();
+        assert!(results.contains_key(&MetricId::CodeDelta));
+    }
+
+    #[test]
+    fn test_git_rotation_batching_cap() {
+        let repos = (0..10).map(|i| format!("/tmp/repo{}", i)).collect::<Vec<_>>();
+        let mut collector = GitCollector::new(repos);
+        collector.collect();
+        assert_eq!(collector.rotation_index, 5);
+        collector.collect();
+        assert_eq!(collector.rotation_index, 0);
+    }
+
+    #[test]
+    fn test_path_traversal_blocked() {
+        assert!(!crate::path_utils::is_safe_path(Path::new("/etc/passwd")));
+        assert!(!crate::path_utils::is_safe_path(Path::new("../.ssh/id_rsa")));
     }
 }

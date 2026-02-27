@@ -553,3 +553,33 @@ fn format_bytes(bytes: u64) -> String {
         format!("{}B/s", bytes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_rain_manager_scale_density() {
+        let mut manager_v1 = RainManager::new(1);
+        manager_v1.update(Duration::from_millis(16), 1920, 1080);
+        let count_v1 = manager_v1.streams.len();
+
+        let mut manager_v10 = RainManager::new(10);
+        manager_v10.update(Duration::from_millis(16), 1920, 1080);
+        let count_v10 = manager_v10.streams.len();
+
+        assert!(count_v10 > count_v1, "Scale 10 should have more streams than Scale 1: {} vs {}", count_v10, count_v1);
+        assert!(count_v10 <= 50, "Density should be capped at 50 for performance");
+    }
+
+    #[test]
+    fn test_rain_stream_reset() {
+        let mut manager = RainManager::new(5);
+        manager.update(Duration::from_millis(16), 1920, 1080);
+        // Move stream far off bottom
+        manager.streams[0].y = 10000.0;
+        manager.update(Duration::from_millis(16), 1920, 1080);
+        assert!(manager.streams[0].y < 0.0, "Stream should have reset to top after falling below height");
+    }
+}
