@@ -15,7 +15,16 @@ use sysinfo::{System, SystemExt, CpuExt};
 use sysinfo::DiskExt;
 use serde::Deserialize;
 use git2::Repository;
+use crossbeam_channel::{unbounded, Sender};
+use crate::path_utils;
+use std::io::Read;
     
+
+#[derive(Debug, Clone)]
+pub enum MetricsCommand {
+    UpdateConfig(Config),
+    ForceRefresh,
+}
 
 /// Unique identifier for metrics.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -671,20 +680,27 @@ impl MetricCollector for FileCollector {
     fn collect(&mut self) -> HashMap<MetricId, MetricValue> {
         let mut map = HashMap::new();
         for file in &self.files {
-            let content = match fs::read_to_string(&file.path) {
-                Ok(s) => {
+            let file_path = Path::new(&file.path);
+            if !path_utils::is_safe_path(file_path) {
+                log::warn!("Access Denied: Path traversal detected or unsafe area: {}", file.path);
+                map.insert(MetricId::Custom(file.metric_id.clone()), MetricValue::String("ACCESS DENIED".to_string()));
+                continue;
+            }
+
+            let mut content = "N/A".to_string();
+            if let Ok(mut f) = fs::File::open(file_path) {
+                let mut buffer = Vec::new();
+                // SEC-03: Cap at 64KB
+                if f.by_ref().take(64 * 1024).read_to_end(&mut buffer).is_ok() {
+                    let s = String::from_utf8_lossy(&buffer);
                     let s = s.trim();
                     if file.tail {
-                        // Get the last line only (useful for logs)
-                        s.lines().last().unwrap_or("").to_string()
+                        content = s.lines().last().unwrap_or("").to_string();
                     } else {
-                        s.to_string()
+                        content = s.to_string();
                     }
-                },
-                Err(_) => "N/A".to_string(),
-            };
-            // Use the configured name as the label if we wanted, but MetricId::Custom uses the ID.
-            // The renderer will use the ID as the label by default, or we can map it.
+                }
+            }
             map.insert(MetricId::Custom(file.metric_id.clone()), MetricValue::String(content));
         }
         map
@@ -698,6 +714,8 @@ pub struct GitCollector {
     pub delta_window: Duration,
     pub last_check: Instant,
     pub cached_delta: (i64, i64),
+    rotation_index: usize,
+    start_time: Instant,
 }
 
 impl GitCollector {
@@ -707,6 +725,8 @@ impl GitCollector {
             delta_window: Duration::from_secs(24 * 3600),
             last_check: Instant::now() - Duration::from_secs(3600), // Force check soon
             cached_delta: (0, 0),
+            rotation_index: 0,
+            start_time: Instant::now(),
         }
     }
 }
@@ -716,6 +736,8 @@ impl MetricCollector for GitCollector {
     fn label(&self) -> &'static str { "Productivity" }
     fn collect(&mut self) -> HashMap<MetricId, MetricValue> {
         let now = Instant::now();
+        
+        // Refresh every hour or if first run
         if now.duration_since(self.last_check) < Duration::from_secs(3600) && self.cached_delta != (0, 0) {
              let mut map = HashMap::new();
              map.insert(MetricId::CodeDelta, MetricValue::String(format!("+{} / -{}", self.cached_delta.0, self.cached_delta.1)));
@@ -724,10 +746,32 @@ impl MetricCollector for GitCollector {
 
         let mut total_added = 0;
         let mut total_deleted = 0;
-        let yesterday = chrono::Local::now() - chrono::Duration::hours(24);
+        
+        // Adaptive window: 1h for the first hour of uptime, 24h thereafter
+        let uptime = self.start_time.elapsed();
+        let window_hours = if uptime < Duration::from_secs(3600) { 1 } else { 24 };
+        let yesterday = chrono::Local::now() - chrono::Duration::hours(window_hours);
         let yesterday_ts = yesterday.timestamp();
 
-        for repo_path in &self.repos {
+        if self.repos.is_empty() {
+             let mut map = HashMap::new();
+             map.insert(MetricId::CodeDelta, MetricValue::String("+0 / -0".to_string()));
+             return map;
+        }
+
+        // Logic for batching (Cap at 5 repos per check)
+        let batch_cap = 5; // Should be tied to config in next iteration
+        let count = std::cmp::min(self.repos.len(), batch_cap);
+        
+        for i in 0..count {
+            let idx = (self.rotation_index + i) % self.repos.len();
+            let repo_path = Path::new(&self.repos[idx]);
+            
+            if !path_utils::is_safe_path(repo_path) {
+                log::warn!("Access Denied: Git repo outside home or unsafe: {}", self.repos[idx]);
+                continue;
+            }
+
             if let Ok(repo) = Repository::open(repo_path) {
                 let mut revwalk = match repo.revwalk() {
                     Ok(rv) => rv,
@@ -735,28 +779,41 @@ impl MetricCollector for GitCollector {
                 };
                 let _ = revwalk.push_head();
 
+                // SEC-04: Limit revwalk objects to 500
+                let mut objects_seen = 0;
                 for oid in revwalk {
+                    if objects_seen >= 500 {
+                        log::debug!("GitCollector: Revwalk cap reached for {}", self.repos[idx]);
+                        break;
+                    }
+                    objects_seen += 1;
+
                     let oid = match oid { Ok(o) => o, Err(_) => continue };
                     let commit = match repo.find_commit(oid) { Ok(c) => c, Err(_) => continue };
                     
                     if commit.time().seconds() < yesterday_ts {
-                        break; // Older than 24h
+                        break; // Older than window
                     }
 
                     if commit.parent_count() > 0 {
-                        let parent = commit.parent(0).unwrap();
-                        let tree = commit.tree().unwrap();
-                        let parent_tree = parent.tree().unwrap();
-                        
-                        let diff = repo.diff_tree_to_tree(Some(&parent_tree), Some(&tree), None).unwrap();
-                        let stats = diff.stats().unwrap();
-                        total_added += stats.insertions() as i64;
-                        total_deleted += stats.deletions() as i64;
+                        if let (Ok(parent), Ok(tree)) = (commit.parent(0), commit.tree()) {
+                            if let Ok(parent_tree) = parent.tree() {
+                                if let Ok(diff) = repo.diff_tree_to_tree(Some(&parent_tree), Some(&tree), None) {
+                                    if let Ok(stats) = diff.stats() {
+                                        total_added += stats.insertions() as i64;
+                                        total_deleted += stats.deletions() as i64;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
+                log::debug!("GitCollector: Polled {} (delta window {}h)", 
+                    path_utils::sanitize_path_for_log(repo_path), window_hours);
             }
         }
-
+        
+        self.rotation_index = (self.rotation_index + count) % self.repos.len();
         self.cached_delta = (total_added, total_deleted);
         self.last_check = now;
 
@@ -768,121 +825,57 @@ impl MetricCollector for GitCollector {
 
 /// Spawns the metrics collection thread.
 /// 
-/// Creates a `MetricsManager` with collectors registered based on the provided configuration.
-/// Returns the shared metrics storage, a shutdown signal, and the thread handle.
-pub fn spawn_metrics_thread(config: &Config) -> (Arc<Mutex<SharedMetrics>>, Arc<AtomicBool>, thread::JoinHandle<()>) {
+/// Returns shared metrics, shutdown flag, thread handle, and command sender.
+pub fn spawn_metrics_thread(config: &Config) -> (Arc<Mutex<SharedMetrics>>, Arc<AtomicBool>, thread::JoinHandle<()>, Sender<MetricsCommand>) {
+    let (tx, rx) = unbounded();
     let shared_metrics = Arc::new(Mutex::new(SharedMetrics::new()));
     let shutdown_flag = Arc::new(AtomicBool::new(false));
     
     let shared_clone = shared_metrics.clone();
     let shutdown_clone = shutdown_flag.clone();
-    let config_clone = config.clone();
+    let config_initial = config.clone();
 
     let handle = thread::spawn(move || {
         let sys_manager = Arc::new(Mutex::new(SysinfoManager::new()));
-        let mut collectors: Vec<Box<dyn MetricCollector>> = Vec::new();
-
-        // 1. Identify required metrics from config
-        let mut required_metrics = HashSet::new();
+        let mut current_config = config_initial;
         
-        // Always add shared/base metrics
-        required_metrics.insert(MetricId::CpuUsage);
-        required_metrics.insert(MetricId::RamUsage);
-        required_metrics.insert(MetricId::Uptime);
-        required_metrics.insert(MetricId::NetworkDetails);
-        required_metrics.insert(MetricId::CpuTemp); // Covers Hwmon
-        required_metrics.insert(MetricId::FanSpeed);
-        required_metrics.insert(MetricId::DayOfWeek);
-
-        // Add per-screen unique metrics
-        for screen in &config_clone.screens {
-            for metric_name in &screen.metrics {
-                if let Some(id) = MetricId::from_str(metric_name) {
-                    required_metrics.insert(id);
-                }
-            }
-        }
-
-        // 2. Register Collectors based on requirements
-        // CPU
-        if required_metrics.contains(&MetricId::CpuUsage) || required_metrics.contains(&MetricId::LoadAvg) {
-            collectors.push(Box::new(CpuCollector::new(sys_manager.clone())));
-        }
-        // RAM
-        if required_metrics.contains(&MetricId::RamUsage) || required_metrics.contains(&MetricId::RamUsed) || required_metrics.contains(&MetricId::RamTotal) {
-            collectors.push(Box::new(MemoryCollector::new(sys_manager.clone())));
-        }
-        // Uptime / Load
-        if required_metrics.contains(&MetricId::Uptime) || required_metrics.contains(&MetricId::LoadAvg) {
-            collectors.push(Box::new(UptimeLoadCollector::new(sys_manager.clone())));
-        }
-        // Network
-        if required_metrics.contains(&MetricId::NetworkDetails) {
-            collectors.push(Box::new(NetworkCollector::new()));
-        }
-        // Disk
-        if required_metrics.contains(&MetricId::DiskUsage) {
-            collectors.push(Box::new(DiskCollector::new(sys_manager.clone())));
-        }
-        // Sensors (Hwmon)
-        if required_metrics.contains(&MetricId::CpuTemp) || required_metrics.contains(&MetricId::FanSpeed) || required_metrics.contains(&MetricId::GpuTemp) {
-            collectors.push(Box::new(HwmonCollector::new()));
-        }
-        // NVIDIA
-        // We check config for explicit enable, or if GPU metrics are requested
-        // Note: Config struct in src/config.rs doesn't have explicit enable_nvidia in General, 
-        // but we can infer or just add it if Gpu metrics are requested.
-        if required_metrics.contains(&MetricId::GpuTemp) || required_metrics.contains(&MetricId::GpuUtil) {
-             collectors.push(Box::new(NvidiaSmiCollector::new()));
-        }
-        // Weather
-        if config_clone.weather.enabled {
-            collectors.push(Box::new(OpenMeteoCollector::new(config_clone.weather.lat, config_clone.weather.lon, true)));
-        }
-
-        // Custom Files
-        if !config_clone.custom_files.is_empty() {
-            // Filter to only include files that are actually requested in the layout
-            let active_files: Vec<_> = config_clone.custom_files.iter()
-                .filter(|f| required_metrics.contains(&MetricId::Custom(f.metric_id.clone())))
-                .cloned()
-                .collect();
-            
-            if !active_files.is_empty() {
-                collectors.push(Box::new(FileCollector::new(active_files)));
-            }
-        }
-
-        // Git Productivity
-        if !config_clone.productivity.repos.is_empty() {
-            collectors.push(Box::new(GitCollector::new(config_clone.productivity.repos.clone())));
-        }
-        
-        // Always add DateCollector
-        collectors.push(Box::new(DateCollector));
+        let mut collectors: Vec<Box<dyn MetricCollector>> = init_collectors(&current_config, sys_manager.clone());
 
         log::info!("Metrics thread initialized with {} collectors.", collectors.len());
-
-        let interval = Duration::from_millis(config_clone.general.update_ms);
 
         while !shutdown_clone.load(Ordering::Relaxed) {
             let start_time = Instant::now();
             
-            // Collect
+            // 1. Process Commands
+            while let Ok(cmd) = rx.try_recv() {
+                match cmd {
+                    MetricsCommand::UpdateConfig(new_cfg) => {
+                        log::info!("Metrics thread: Reloading configuration...");
+                        current_config = new_cfg;
+                        collectors = init_collectors(&current_config, sys_manager.clone());
+                    }
+                    MetricsCommand::ForceRefresh => {
+                        log::info!("Metrics thread: Force refresh requested.");
+                    }
+                }
+            }
+
+            // 2. Collect Data
             let mut frame_data = HashMap::new();
             for collector in &mut collectors {
                 let data = collector.collect();
                 frame_data.extend(data);
             }
 
-            // Update Shared State
+            // 3. Update Shared State
             if let Ok(mut shared) = shared_clone.lock() {
                 shared.data = MetricData { values: frame_data };
                 shared.timestamp = Instant::now();
                 shared.day_of_week = chrono::Local::now().weekday().to_string();
             }
 
-            // Sleep remainder of interval
+            // 4. Sleep
+            let interval = Duration::from_millis(current_config.general.update_ms);
             let elapsed = start_time.elapsed();
             if elapsed < interval {
                 thread::sleep(interval - elapsed);
@@ -891,7 +884,48 @@ pub fn spawn_metrics_thread(config: &Config) -> (Arc<Mutex<SharedMetrics>>, Arc<
         log::info!("Metrics thread stopped.");
     });
 
-    (shared_metrics, shutdown_flag, handle)
+    (shared_metrics, shutdown_flag, handle, tx)
+}
+
+fn init_collectors(config: &Config, sys_manager: Arc<Mutex<SysinfoManager>>) -> Vec<Box<dyn MetricCollector>> {
+    let mut collectors: Vec<Box<dyn MetricCollector>> = Vec::new();
+    let mut required_metrics = HashSet::new();
+    
+    // Core requirements
+    required_metrics.insert(MetricId::CpuUsage);
+    required_metrics.insert(MetricId::RamUsage);
+    required_metrics.insert(MetricId::Uptime);
+    required_metrics.insert(MetricId::DayOfWeek);
+
+    for screen in &config.screens {
+        for m in &screen.metrics {
+            if let Some(id) = MetricId::from_str(m) {
+                required_metrics.insert(id);
+            }
+        }
+    }
+
+    if required_metrics.contains(&MetricId::CpuUsage) || required_metrics.contains(&MetricId::LoadAvg) {
+        collectors.push(Box::new(CpuCollector::new(sys_manager.clone())));
+    }
+    if required_metrics.contains(&MetricId::RamUsage) || required_metrics.contains(&MetricId::RamUsed) {
+        collectors.push(Box::new(MemoryCollector::new(sys_manager.clone())));
+    }
+    if required_metrics.contains(&MetricId::Uptime) || required_metrics.contains(&MetricId::LoadAvg) {
+        collectors.push(Box::new(UptimeLoadCollector::new(sys_manager.clone())));
+    }
+    if required_metrics.contains(&MetricId::NetworkDetails) {
+        collectors.push(Box::new(NetworkCollector::new()));
+    }
+    if !config.productivity.repos.is_empty() {
+        collectors.push(Box::new(GitCollector::new(config.productivity.repos.clone())));
+    }
+    if config.weather.enabled {
+        collectors.push(Box::new(OpenMeteoCollector::new(config.weather.lat, config.weather.lon, true)));
+    }
+    
+    collectors.push(Box::new(DateCollector));
+    collectors
 }
 
 // Compatibility for tests

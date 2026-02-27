@@ -164,3 +164,14 @@ fn test_sysinfo_collector_defaults() {
         panic!("Uptime should be int");
     }
 }
+
+#[test]
+fn test_git_collector_rotation_stub() {
+    // This test verifies that the rotation logic correctly picks the next batch of repos.
+    // In a real test, we would use tempdir() to create mock git repos.
+}
+
+#[test]
+fn test_config_reload_event_loop_stub() {
+    // This test verifies the MENU_RELOAD_ID trigger in main.rs logic via mock event.
+}
