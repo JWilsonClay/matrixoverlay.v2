@@ -5,6 +5,7 @@ use cairo::{Context as CairoContext, Format, ImageSurface, Operator};
 use pangocairo::pango::{FontDescription, Layout as PangoLayout, Weight};
 use xcb::x;
 use rand::Rng;
+use rand::thread_rng;
 
 use crate::config::Config;
 use crate::layout::Layout as ConfigLayout;
@@ -21,43 +22,53 @@ pub struct RainStream {
 pub struct RainManager {
     pub streams: Vec<RainStream>,
     pub realism_scale: u32,
+    pub last_width: i32,
+    pub last_height: i32,
 }
 
 impl RainManager {
     pub fn new(realism_scale: u32) -> Self {
-        let mut manager = Self { streams: Vec::new(), realism_scale };
-        manager.reset_streams(1920); // Default width, will adjust on first draw
-        manager
+        Self { 
+            streams: Vec::new(), 
+            realism_scale,
+            last_width: 1920,
+            last_height: 1080,
+        }
     }
 
-    fn reset_streams(&mut self, width: i32) {
-        let mut rng = rand::thread_rng();
+    fn reset_streams(&mut self, width: i32, height: i32) {
+        let mut rng = thread_rng();
         let count = (self.realism_scale as f64 * (width as f64 / 100.0)) as usize;
         let count = std::cmp::min(count, 50); // Cap for performance
 
         self.streams.clear();
         for _ in 0..count {
             self.streams.push(RainStream {
-                x: rng.gen_range(0..width) as f64,
-                y: rng.gen_range(-height() as f64..0.0),
+                x: rng.gen_range(0.0..width as f64),
+                y: rng.gen_range(-(height as f64)..0.0),
                 speed: rng.gen_range(2.0..10.0),
                 glyphs: (0..rng.gen_range(5..15)).map(|_| random_katakana()).collect(),
                 depth_scale: rng.gen_range(0.5..1.2),
             });
         }
+        self.last_width = width;
+        self.last_height = height;
     }
 
-    pub fn update(&mut self, dt: Duration) {
+    pub fn update(&mut self, dt: Duration, width: i32, height: i32) {
+        if self.streams.is_empty() || width != self.last_width || height != self.last_height {
+            self.reset_streams(width, height);
+        }
         let dy = 60.0 * dt.as_secs_f64();
         for stream in &mut self.streams {
             stream.y += stream.speed * dy;
-            if stream.y > height() as f64 + 200.0 {
+            if stream.y > height as f64 + 200.0 {
                 stream.y = -200.0;
-                stream.glyphs = (0..rand::thread_rng().gen_range(5..15)).map(|_| random_katakana()).collect();
+                stream.glyphs = (0..thread_rng().gen_range(5..15)).map(|_| random_katakana()).collect();
             }
             // Occasionally mutation
-            if rand::thread_rng().gen_bool(0.05) {
-                let idx = rand::thread_rng().gen_range(0..stream.glyphs.len());
+            if thread_rng().gen_bool(0.05) {
+                let idx = thread_rng().gen_range(0..stream.glyphs.len());
                 stream.glyphs[idx] = random_katakana();
             }
         }
@@ -65,12 +76,13 @@ impl RainManager {
 
     pub fn draw(&self, cr: &CairoContext, config: &Config) -> Result<()> {
         let glyph_size = config.general.font_size as f64 * 0.8;
+        let height = self.last_height as f64;
         
         for stream in &self.streams {
             let alpha_base = stream.depth_scale.powf(2.0);
             for (i, &glyph) in stream.glyphs.iter().enumerate() {
                 let y = stream.y - (i as f64 * glyph_size * 1.2);
-                if y < -20.0 || y > height() as f64 + 20.0 { continue; }
+                if y < -20.0 || y > height + 20.0 { continue; }
                 
                 let alpha = if i == 0 { 1.0 } else { alpha_base * (1.0 - (i as f64 / stream.glyphs.len() as f64)) };
                 let alpha = alpha.clamp(0.0, 1.0);
@@ -99,11 +111,9 @@ impl RainManager {
 }
 
 fn random_katakana() -> char {
-    let code = rand::thread_rng().gen_range(0x30A0..0x30FF);
+    let code = thread_rng().gen_range(0x30A0..0x30FF);
     std::char::from_u32(code).unwrap_or(' ')
 }
-
-fn height() -> i32 { 1080 } // Fallback, should use renderer height
 
 /// Handles drawing to an offscreen surface and presenting it to the X11 window.
 pub struct Renderer {
@@ -171,13 +181,24 @@ impl Renderer {
         Ok(())
     }
 
+    pub fn update_config(&mut self, config: Config) {
+        let screen = &config.screens[self.monitor_index];
+        self.config_layout = crate::layout::compute(
+            screen, 
+            self.surface.width() as u16, 
+            self.surface.height() as u16, 
+            config.general.font_size as f64
+        );
+        self.rain_manager.realism_scale = config.cosmetics.realism_scale;
+    }
+
     /// Main draw loop.
     pub fn draw(
         &mut self, 
         conn: &xcb::Connection, 
         window: x::Window, 
-        metrics: &MetricData, 
-        config: &Config
+        config: &Config, 
+        metrics: &MetricData
     ) -> Result<()> {
         let cr = CairoContext::new(&self.surface)?;
         let pango_layout = pangocairo::functions::create_layout(&cr);
@@ -185,7 +206,11 @@ impl Renderer {
         self.clear(&cr)?;
 
         // Update physics
-        self.rain_manager.update(Duration::from_millis(config.general.update_ms));
+        self.rain_manager.update(
+            Duration::from_millis(config.general.update_ms),
+            self.surface.width(),
+            self.surface.height()
+        );
 
         // 1. Draw Rain
         if config.cosmetics.rain_mode != "off" {
