@@ -1,0 +1,4 @@
+
+cargo build --release
+
+RUST_LOG=debug ./target/release/matrix-overlay
