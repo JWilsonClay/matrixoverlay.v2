@@ -188,17 +188,4 @@ Configuration is loaded from `~/.config/desktop-overlay/config.toml`.
     *   **Diffing:** The main loop compares new metrics with the previous frame. If values (rounded to integer precision) haven't changed, rendering is skipped.
     *   **Resources:** Expected memory usage < 30MB. CPU usage < 0.5% on modern cores.
 
-## 8. Diagram: Layering
-
-```text
-[ User Eyes ]
-      |
-      v
-[ Desktop Icons (DING) ]  <-- Clickable, handles file operations
-      |
-      v
-[ Overlay Window ]        <-- Transparent, Click-through (XShape), Displays Stats
-      |
-      v
-[ Wallpaper / Root ]      <-- GNOME Background
-```
+    *   **Resources:** Expected memory usage < 30MB. CPU usage < 0.5% on modern cores.

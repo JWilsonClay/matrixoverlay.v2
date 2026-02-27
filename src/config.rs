@@ -39,14 +39,21 @@ pub struct CustomFile {
     pub tail: bool,        // If true, only display the last line of the file
 }
 
+/// Productivity tracking configuration.
+/// 
+/// Ties to Stage 0: Productivity Features (Git/AI).
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Productivity {
+    /// List of local Git repository paths to monitor.
     #[serde(default)]
     pub repos: Vec<String>,
+    /// Threshold for auto-committing (not yet implemented in v2).
     #[serde(default = "default_commit_threshold")]
     pub auto_commit_threshold: u64,
+    /// Whether Ollama AI insights are enabled.
     #[serde(default)]
     pub ollama_enabled: bool,
+    /// Maximum number of repositories to scan per update cycle.
     #[serde(default = "default_batch_cap")]
     pub batch_cap: u32,
 }
@@ -54,12 +61,18 @@ pub struct Productivity {
 fn default_commit_threshold() -> u64 { 1000 }
 fn default_batch_cap() -> u32 { 5 }
 
+/// Cosmetic and animation configuration.
+/// 
+/// Ties to Stage 0: Matrix Aesthetics (<1% CPU goal).
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Cosmetics {
+    /// Rain mode: "fall" (classic), "pulse" (low-resource glow), or "off".
     #[serde(default = "default_rain_mode")]
-    pub rain_mode: String, // "fall", "pulse", "off"
+    pub rain_mode: String,
+    /// Realism scale (0-10) affecting stream density and speed variance.
     #[serde(default = "default_realism")]
-    pub realism_scale: u32, // 0-10
+    pub realism_scale: u32,
+    /// Whether metrics should occlude the rain for better readability.
     #[serde(default = "default_true")]
     pub occlusion_enabled: bool,
 }
@@ -127,6 +140,10 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Loads configuration from `~/.config/matrix-overlay/config.json`.
+    /// 
+    /// If the file does not exist, it creates a default configuration.
+    /// Validates the loaded configuration before returning.
     pub fn load() -> Result<Self> {
         let home = env::var("HOME").context("HOME environment variable not set")?;
         let config_path = Path::new(&home).join(".config/matrix-overlay/config.json");
@@ -148,6 +165,10 @@ impl Config {
         Ok(config)
     }
 
+    /// Validates configuration values and safety of provided paths.
+    /// 
+    /// Ties to Stage 4: Security Hardening. Uses `path_utils` to verify 
+    /// that all monitored files and Git repos are within safe directories.
     pub fn validate(&self) -> Result<()> {
         if self.general.font_size < 12 {
             bail!("font_size must be >= 12");
