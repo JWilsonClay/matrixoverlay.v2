@@ -1,4 +1,7 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+// Benchmark for Matrix Overlay rendering
+extern crate criterion;
+
+use criterion::{Criterion, criterion_group, criterion_main};
 use cairo::{ImageSurface, Format, Context};
 use pangocairo::pango::FontDescription;
 
