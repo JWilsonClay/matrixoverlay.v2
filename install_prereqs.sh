@@ -18,7 +18,10 @@ sudo apt update && sudo apt install -y \
     cargo \
     libssl-dev \
     pkg-config \
-    libxdo-dev
+    libxdo-dev \
+    libgit2-dev
+
+echo "Tip: Install Ollama via 'curl -fsSL https://ollama.com/install.sh | sh' for AI insights."
 
 echo "2. Installing project via Cargo..."
 cargo install --path .
