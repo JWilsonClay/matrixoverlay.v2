@@ -27,24 +27,43 @@ pub enum MetricsCommand {
 }
 
 /// Unique identifier for metrics.
+/// 
+/// Ties to Stage 0: Requirements Matrix (CPU, RAM, GPU, Weather, Productivity).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MetricId {
+    /// Global CPU usage percentage.
     CpuUsage,
+    /// Memory usage percentage.
     RamUsage,
+    /// Resident memory in bytes.
     RamUsed,
+    /// Total system memory in bytes.
     RamTotal,
+    /// System load average (1m).
     LoadAvg,
+    /// Total system uptime.
     Uptime,
-    NetworkDetails, // Map of interface -> (rx, tx)
+    /// Network throughput per interface.
+    NetworkDetails,
+    /// Disk space usage percentage.
     DiskUsage,
+    /// CPU core temperature (via hwmon).
     CpuTemp,
+    /// System fan speed (RPM).
     FanSpeed,
+    /// NVIDIA GPU core temperature.
     GpuTemp,
+    /// NVIDIA GPU utilization percentage.
     GpuUtil,
+    /// Current weather temperature.
     WeatherTemp,
+    /// Current weather description (e.g. "Clear").
     WeatherCondition,
+    /// Current day of week for header display.
     DayOfWeek,
+    /// Git code delta (added/deleted lines in 24h).
     CodeDelta,
+    /// Generic custom metric.
     Custom(String),
 }
 
@@ -168,16 +187,24 @@ impl SharedMetrics {
 }
 
 /// Helper to monitor system load and throttle background operations.
+/// 
+/// Ties to Stage 0: <1% CPU target. Ensures that background metrics collection
+/// does not compete with higher-priority rendering or system tasks.
 #[derive(Debug, Clone)]
 pub struct ResourceGuard {
+    /// CPU usage percentage threshold (0.0 - 100.0)
     pub cpu_threshold: f32,
 }
 
 impl ResourceGuard {
+    /// Creates a new ResourceGuard with the given CPU threshold.
     pub fn new(threshold: f32) -> Self {
         Self { cpu_threshold: threshold }
     }
 
+    /// Returns true if the current global CPU usage exceeds the threshold.
+    ///
+    /// Refreshes the CPU stats in the provided SysinfoManager.
     pub fn should_throttle(&self, sys_manager: &mut SysinfoManager) -> bool {
         sys_manager.system.refresh_cpu();
         sys_manager.system.global_cpu_info().cpu_usage() > self.cpu_threshold

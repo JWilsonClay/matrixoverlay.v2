@@ -1,13 +1,3 @@
-# matrix-overlay
-
-A lightweight, native X11 system monitoring overlay written in Rust. Designed for minimal resource usage and "Matrix-style" aesthetics.
-
-## Compilation Instructions
-
-Ensure you have Rust installed (stable).
-
-1.  **Automated Setup**:
-    Run the provided setup script to install dependencies and the binary:
     ```bash
     chmod +x install_prereqs.sh
     ./install_prereqs.sh
