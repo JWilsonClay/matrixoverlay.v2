@@ -145,13 +145,9 @@ fn test_geometry_and_visual() {
         assert_eq!(geom.height(), monitor.monitor.height);
         
         // Verify position
-        // Note: Window creation applies offsets from config.
-        // Since we use Config::default(), offsets are 20, 20.
-        let (off_x, off_y) = config.screens.first()
-            .map(|s| (s.x_offset, s.y_offset))
-            .unwrap_or((0, 0));
-
-        assert_eq!(geom.x(), (monitor.monitor.x as i32 + off_x) as i16, "Window X position mismatch (check offsets)");
-        assert_eq!(geom.y(), (monitor.monitor.y as i32 + off_y) as i16, "Window Y position mismatch (check offsets)");
+        // Window is created at monitor-x, monitor-y exactly. 
+        // Config offsets (padding) are handled during drawing, not by window positioning.
+        assert_eq!(geom.x(), monitor.monitor.x as i16, "Window X position mismatch");
+        assert_eq!(geom.y(), monitor.monitor.y as i16, "Window Y position mismatch");
     }
 }

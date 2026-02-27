@@ -7,6 +7,8 @@ mod metrics;
 mod render;
 mod tray;
 mod window;
+mod timer;
+mod path_utils;
 
 use anyhow::{Context, Result};
 use std::sync::{Arc, atomic::Ordering};

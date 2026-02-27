@@ -163,6 +163,19 @@ impl Config {
                 bail!("Screen {} offsets must be non-negative", i);
             }
         }
+
+        // Security Path Validation
+        for file in &self.custom_files {
+            if !crate::path_utils::is_safe_path(std::path::Path::new(&file.path)) {
+                log::warn!("Security Warning: Unsafe path detected in custom_files: {}", file.path);
+            }
+        }
+        for repo in &self.productivity.repos {
+            if !crate::path_utils::is_safe_path(std::path::Path::new(repo)) {
+                log::warn!("Security Warning: Unsafe Git repo path: {}", repo);
+            }
+        }
+
         Ok(())
     }
 
