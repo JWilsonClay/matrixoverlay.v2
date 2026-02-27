@@ -144,7 +144,7 @@ impl MetricData {
     pub fn summary(&self) -> String {
         let count = self.values.len();
         let mut entries: Vec<_> = self.values.iter().collect();
-        entries.sort_by_key(|(k, _)| k.clone());
+        entries.sort_by_key(|(k, _)| k.as_str());
         
         let sample: String = entries.iter().take(3).map(|(k, v)| {
             match v {
@@ -872,14 +872,12 @@ impl MetricCollector for GitCollector {
 #[derive(Debug)]
 pub struct OllamaCollector {
     last_fetch: Instant,
-    guard: ResourceGuard,
 }
 
 impl OllamaCollector {
     pub fn new() -> Self {
         Self {
             last_fetch: Instant::now() - Duration::from_secs(3601),
-            guard: ResourceGuard::new(80.0),
         }
     }
 }

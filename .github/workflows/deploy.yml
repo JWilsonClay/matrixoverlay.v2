@@ -1,0 +1,25 @@
+name: Release CI
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y libxcb1-dev libcairo2-dev libpango1.0-dev libayatana-appindicator3-dev libgit2-dev
+      - name: Build Release
+        run: cargo build --release
+      - name: Build Debian Package
+        run: |
+          cargo install cargo-deb
+          cargo deb
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: target/debian/*.deb
