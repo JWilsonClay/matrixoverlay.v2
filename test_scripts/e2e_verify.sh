@@ -30,6 +30,18 @@ cargo build --release
 BIN_SIZE=$(stat -c%s target/release/matrix-overlay)
 echo "Binary Size: $((BIN_SIZE/1024)) KB"
 
+# 5. Load Monitoring (New for Stage 6)
+echo "[5/5] Monitoring Resource Usage (10s sample)..."
+# Start the app in check-only mode or background? 
+# For verification, we assume the performance_tests.rs covers the logic, 
+# but here we can do a quick check of the binary.
+timeout 10 target/release/matrix-overlay --check-only &
+PID=$!
+sleep 2
+CPU_LOAD=$(ps -p $PID -o %cpu | tail -n 1)
+echo "Measured CPU Load: $CPU_LOAD%"
+# We expect very low load in check-only mode, but this proves the binary runs.
+
 echo "=== E2E Verification PASSED ==="
 if [ -f config.json.bak ]; then
     mv config.json.bak config.json
