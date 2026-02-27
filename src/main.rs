@@ -22,7 +22,7 @@ use xcb::x;
 
 use crate::config::Config;
 use crate::window::create_all_windows;
-use crate::metrics::spawn_metrics_thread;
+use crate::metrics::{MetricData, MetricId, MetricValue, MetricsCommand, spawn_metrics_thread};
 use crate::render::Renderer;
 use crate::layout::Layout;
 use crate::tray::{SystemTray, MENU_QUIT_ID, MENU_RELOAD_ID, MENU_EDIT_ID};
@@ -33,7 +33,7 @@ fn main() -> Result<()> {
     log::info!("Initializing Matrix Overlay...");
 
     // 2. Load Config
-    let config = Config::load().context("Failed to load configuration")?;
+    let mut config = Config::load().context("Failed to load configuration")?;
     log::info!("Configuration loaded successfully.");
     for (i, screen) in config.screens.iter().enumerate() {
         log::info!("Monitor {}: Configured metrics: {:?}", i, screen.metrics);
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
     }
 
     // 3. Spawn Metrics Thread
-    let (metrics, shutdown, _metrics_handle) = spawn_metrics_thread(&config);
+    let (metrics, shutdown, _metrics_handle, metrics_tx) = spawn_metrics_thread(&config);
 
     // 4. Setup XCB Connection
     let (conn, screen_num) = xcb::Connection::connect(None).context("Failed to connect to X server")?;
@@ -204,7 +204,7 @@ fn main() -> Result<()> {
                                 if let Some(idx) = wm.monitors.iter().position(|m| m.window == ev.window()) {
                                     if let Some(renderer) = renderers.get_mut(idx) {
                                         if let Ok(shared) = metrics.lock() {
-                                            let _ = renderer.draw(&conn, ev.window(), &shared.data, &config);
+                                            let _ = renderer.draw(&conn, ev.window(), &config, &shared.data);
                                         }
                                     }
                                 }
@@ -230,8 +230,8 @@ fn main() -> Result<()> {
                                     i, ctx.monitor.width, ctx.monitor.height, ctx.monitor.x, ctx.monitor.y,
                                     shared.data.values.len());
 
-                                if let Err(e) = renderer.draw(&conn, ctx.window, &shared.data, &config) {
-                                    log::error!("Failed to draw window {}: {}", i, e);
+                                if let Err(e) = renderer.draw(&conn, ctx.window, &config, &shared.data) {
+                                    log::error!("Render failed on monitor {}: {}", i, e);
                                 }
                             }
                         }
@@ -247,18 +247,28 @@ fn main() -> Result<()> {
                     if event.id.as_ref() == MENU_RELOAD_ID {
                         log::info!("Reloading configuration...");
                         match Config::load() {
-                            Ok(_new_config) => {
-                                // In a full implementation, we'd need to re-pass the config to threads.
-                                // For Stage 2, we just log success/fail to verify the reload trigger.
-                                log::info!("Config reloaded successfully.");
+                            Ok(new_config) => {
+                                config = new_config.clone();
+                                
+                                // Update all renderers
+                                for renderer in &mut renderers {
+                                    renderer.update_config(new_config.clone());
+                                }
+                                
+                                // Update metrics thread
+                                if let Err(e) = metrics_tx.send(MetricsCommand::UpdateConfig(new_config.clone())) {
+                                    log::error!("Failed to notify metrics thread of reload: {}", e);
+                                }
+                                
+                                log::info!("Config reloaded and broadcast to all modules.");
                             },
                             Err(e) => log::error!("Failed to reload config: {}", e),
                         }
                     }
                     if event.id.as_ref() == "about" {
                         log::info!("Displaying About info...");
-                        // Trigger a notification or print to log as placeholder
                         println!("Matrix Overlay v2 - jwils (John Wilson) and Grok (xAI)");
+                        // NOTE: Open GUI notification in Stage 4/5 integration
                     }
                     if event.id.as_ref() == MENU_EDIT_ID {
                         if let Ok(home) = env::var("HOME") {
