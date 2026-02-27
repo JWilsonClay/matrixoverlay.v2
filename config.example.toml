@@ -1,0 +1,54 @@
+# x11-monitor-overlay Configuration Example
+
+[global]
+# Font family (must be installed on system)
+font_family = "Monospace"
+# Font size in points
+font_size = 14.0
+# Primary text color (Matrix Green)
+primary_color = "#00FF41"
+# Update interval in milliseconds (1000ms = 1s)
+update_interval_ms = 1000
+# Global hotkey to toggle visibility
+hotkey = "Ctrl+Alt+W"
+# Location for Weather (London)
+latitude = 51.5074
+longitude = -0.1278
+# Enable NVIDIA GPU polling (set to false if no NVIDIA GPU)
+enable_nvidia = true
+
+# Glow effect offsets (x, y, alpha)
+# Simulates a CRT glow
+glow_offsets = [
+    [-2.0, -2.0, 0.15],
+    [2.0, -2.0, 0.15],
+    [-2.0, 2.0, 0.15],
+    [2.0, 2.0, 0.15]
+]
+
+# Metrics shared across all monitors (calculated once)
+shared_metrics = ["cpu_usage", "ram_usage", "day_of_week"]
+
+# Monitor Configuration
+# Use `xrandr` to find your monitor IDs (though currently app uses index order)
+
+[[monitors]]
+id = "Primary"
+# Safe zones to avoid desktop icons/panels
+adaptive_offsets = { left = 20, top = 120, right = 20, bottom = 60 }
+
+[[monitors.metrics]]
+id = "day_of_week"
+label = ""
+alignment = "left"
+scroll = false
+
+[[monitors.metrics]]
+id = "cpu_usage"
+label = "CPU"
+alignment = "left"
+
+[[monitors.metrics]]
+id = "ram_usage"
+label = "RAM"
+alignment = "left"
