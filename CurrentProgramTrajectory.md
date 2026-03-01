@@ -61,18 +61,18 @@
 - Multiple rebuild/launch attempts failed with "No such file or directory" for target/release/matrix-overlay.
 
 **Current State**:
-- **Status**: Pass (Build & Tests).
-- **Findings**: 
-  - `cargo build --release` succeeded in `matrixoverlay.v2`.
-  - All Unit and Integration tests passed (lib, main, asd, hardware, metrics, performance, window).
-  - `cargo test` failed on Doc-tests due to host environment (`rustdoc` missing `libLLVM`). This is not a code issue.
-  - `debugger.py` updated to use `cargo test --lib --bins --tests` to bypass broken doc-tests.
-- **Fix Applied**: Modified test command in debugger script and cleaned up unused menu logic in `tray.rs`.
+- **Status**: Partial Success (Runtime Verified).
+- **Findings**:
+  - **Layering Success**: Overlay correctly sits behind desktop icons and above wallpaper. Click-through works.
+  - **Metrics**: CPU, RAM, Disk displaying correctly.
+  - **Tray Failure**: `LIBDBUSMENU-GLIB-WARNING` indicates menu items are not populating or attaching correctly to the DBus interface.
+  - **Visuals**: "Rain" effect is missing (likely disabled in config or not fully wired in Stage 1).
+- **Fix Needed**: Debug `src/tray.rs` menu construction and `src/main.rs` event loop.
 
 **Current Trajectory**:
-- **Next Steps**: Run updated `debugger.py` to confirm green suite.
-- **Focus**: Runtime Verification.
-- **Goal**: verify install success and ensure overlay visibility and tray icon functionality.
+- **Next Steps**: Fix Settings Menu and Enable Rain.
+- **Focus**: `src/tray.rs` and `src/main.rs`.
+- **Goal**: Make the tray menu interactive to allow easy config editing.
 
 ### [2026-02-27] Debugger Update & Test Verification
 **Status**: Pass (Build & Functional Tests)

@@ -1,6 +1,7 @@
 // src/tray.rs
 use anyhow::Result;
-use tray_icon::{Icon, TrayIconBuilder, menu::{Menu, MenuItem}};
+use tray_icon::{Icon, TrayIconBuilder, menu::{Menu, MenuItem, PredefinedMenuItem, Submenu, CheckMenuItem}};
+use crate::config::Config;
 
 pub const MENU_QUIT_ID: &str = "quit";
 pub const MENU_RELOAD_ID: &str = "reload";
@@ -10,52 +11,64 @@ pub const MENU_THEME_CALM: &str = "theme_calm";
 pub const MENU_THEME_ALERT: &str = "theme_alert";
 pub const MENU_TOGGLE_AUTO_COMMIT: &str = "toggle_auto_commit";
 pub const MENU_TOGGLE_OLLAMA: &str = "toggle_ollama";
+pub const MENU_CONFIG_GUI_ID: &str = "config_gui";
+pub const MENU_CONFIG_JSON_ID: &str = "config_json";
 
 pub struct SystemTray {
     _tray: tray_icon::TrayIcon,
+    _menu: Menu,
 }
 
 impl SystemTray {
-    pub fn new() -> Result<Self> {
+    pub fn new(config: &Config) -> Result<Self> {
         let icon = generate_icon()?;
         let menu = Menu::new();
         
-        // Theme Submenu
-        let theme_menu = Menu::new();
-        theme_menu.append(&MenuItem::with_id(MENU_THEME_CLASSIC, "Classic Green", true, None))?;
-        theme_menu.append(&MenuItem::with_id(MENU_THEME_CALM, "Calm Cyan", true, None))?;
-        theme_menu.append(&MenuItem::with_id(MENU_THEME_ALERT, "Alert Red", true, None))?;
-        let theme_submenu = tray_icon::menu::Submenu::new("Themes", true);
+        // 1. Config Submenu
+        let config_submenu = Submenu::new("Settings / Config", true);
+        config_submenu.append(&MenuItem::with_id(MENU_CONFIG_GUI_ID, "Open GUI Control Panel", true, None))?;
+        config_submenu.append(&MenuItem::with_id(MENU_CONFIG_JSON_ID, "Edit JSON (IDE)", true, None))?;
+        menu.append(&config_submenu)?;
+        
+        menu.append(&MenuItem::with_id(MENU_RELOAD_ID, "Reload Overlay", true, None))?;
+        menu.append(&PredefinedMenuItem::separator())?;
+        
+        // 2. Themes (Submenu restored for cleaner look)
+        let theme_submenu = Submenu::new("Themes", true);
         theme_submenu.append(&MenuItem::with_id(MENU_THEME_CLASSIC, "Classic Green", true, None))?;
-        theme_submenu.append(&MenuItem::with_id(MENU_THEME_CALM, "Calm Cyan", true, None))?;
+        theme_submenu.append(&MenuItem::with_id(MENU_THEME_CALM, "Calm Blue", true, None))?;
         theme_submenu.append(&MenuItem::with_id(MENU_THEME_ALERT, "Alert Red", true, None))?;
-
-        // Productivity Submenu (Toggles)
-        let prod_submenu = tray_icon::menu::Submenu::new("Productivity", true);
-        prod_submenu.append(&MenuItem::with_id(MENU_TOGGLE_AUTO_COMMIT, "Auto-Commits", true, None))?;
-        prod_submenu.append(&MenuItem::with_id(MENU_TOGGLE_OLLAMA, "AI Summaries (Ollama)", true, None))?;
-
-        // Settings Submenu
-        let settings_submenu = tray_icon::menu::Submenu::new("Settings", true);
-        settings_submenu.append(&MenuItem::with_id(MENU_EDIT_ID, "Edit Config", true, None))?;
-        settings_submenu.append(&MenuItem::with_id(MENU_RELOAD_ID, "Reload Config", true, None))?;
-        
-        let about_item = MenuItem::with_id("about", "About Matrix v2", true, None);
-        let quit_item = MenuItem::with_id(MENU_QUIT_ID, "Quit", true, None);
-        
         menu.append(&theme_submenu)?;
-        menu.append(&prod_submenu)?;
-        menu.append(&settings_submenu)?;
-        menu.append(&about_item)?;
-        menu.append(&quit_item)?;
+        
+        menu.append(&PredefinedMenuItem::separator())?;
+        
+        // 3. Toggles with Checkmarks
+        menu.append(&CheckMenuItem::with_id(
+            MENU_TOGGLE_AUTO_COMMIT, 
+            "Auto-Commit Status", 
+            true, 
+            config.productivity.auto_commit_threshold > 0, 
+            None
+        ))?;
+        
+        menu.append(&CheckMenuItem::with_id(
+            MENU_TOGGLE_OLLAMA, 
+            "Ollama AI Insights", 
+            true, 
+            config.productivity.ollama_enabled, 
+            None
+        ))?;
+        
+        menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&MenuItem::with_id(MENU_QUIT_ID, "Quit", true, None))?;
         
         let tray = TrayIconBuilder::new()
-            .with_menu(Box::new(menu))
-            .with_tooltip("X11 Monitor Overlay")
+            .with_menu(Box::new(menu.clone()))
+            .with_tooltip("Matrix Overlay v2")
             .with_icon(icon)
             .build()?;
 
-        Ok(Self { _tray: tray })
+        Ok(Self { _tray: tray, _menu: menu })
     }
 }
 

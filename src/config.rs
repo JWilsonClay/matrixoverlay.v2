@@ -10,13 +10,19 @@ use std::path::Path;
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct General {
     pub font_size: u32,
+    #[serde(default = "default_metric_font_size")]
+    pub metric_font_size: u32,
     pub color: String,
     pub update_ms: u64,
     #[serde(default = "default_theme")]
     pub theme: String,
     #[serde(default = "default_glow_passes")]
     pub glow_passes: Vec<(f64, f64, f64)>,
+    #[serde(default = "default_true")]
+    pub show_monitor_label: bool,
 }
+
+fn default_metric_font_size() -> u32 { 14 }
 
 fn default_theme() -> String { "classic".to_string() }
 
@@ -79,11 +85,66 @@ pub struct Cosmetics {
     /// Whether metrics should occlude the rain for better readability.
     #[serde(default = "default_true")]
     pub occlusion_enabled: bool,
+    /// rain speed multiplier (0.0 - 3.0+)
+    #[serde(default = "default_rain_speed")]
+    pub rain_speed: f64,
+    /// Brightness for metrics (0.0 - 1.0)
+    #[serde(default = "default_brightness")]
+    pub metrics_brightness: f64,
+    /// Brightness for matrix rain (0.0 - 1.0)
+    #[serde(default = "default_brightness")]
+    pub matrix_brightness: f64,
+    /// Whether to draw a border around metrics
+    #[serde(default)]
+    pub border_enabled: bool,
+    /// Border color hex
+    #[serde(default = "default_border_color")]
+    pub border_color: String,
+    /// Opacity of the metric background box
+    #[serde(default = "default_bg_opacity")]
+    pub background_opacity: f64,
 }
 
-fn default_rain_mode() -> String { "off".to_string() }
-fn default_realism() -> u32 { 5 }
+fn default_rain_speed() -> f64 { 1.0 }
+fn default_brightness() -> f64 { 0.9 }
+fn default_border_color() -> String { "#00FF41".to_string() }
+fn default_bg_opacity() -> f64 { 0.7 }
+
+fn default_rain_mode() -> String { "fall".to_string() }
+fn default_realism() -> u32 { 10 }
 fn default_true() -> bool { true }
+fn default_false() -> bool { false }
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Logging {
+    pub enabled: bool,
+    pub log_path: String,
+    #[serde(default = "default_interval")]
+    pub interval_secs: u64,
+    #[serde(default = "default_max_files")]
+    pub max_files: usize,
+    #[serde(default = "default_max_size")]
+    pub max_file_size_mb: u64,
+    #[serde(default)]
+    pub build_logging_enabled: bool,
+}
+
+fn default_interval() -> u64 { 30 }
+fn default_max_files() -> usize { 5 }
+fn default_max_size() -> u64 { 1 }
+
+impl Default for Logging {
+    fn default() -> Self {
+        Self { 
+            enabled: false, 
+            log_path: "/tmp/matrix_overlay_logs/".to_string(),
+            interval_secs: 30,
+            max_files: 5,
+            max_file_size_mb: 1,
+            build_logging_enabled: true,
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
@@ -96,6 +157,8 @@ pub struct Config {
     pub productivity: Productivity,
     #[serde(default)]
     pub cosmetics: Cosmetics,
+    #[serde(default)]
+    pub logging: Logging,
 }
 
 fn default_glow_passes() -> Vec<(f64, f64, f64)> {
@@ -113,10 +176,12 @@ impl Default for Config {
         Self {
             general: General {
                 font_size: 14,
+                metric_font_size: 14,
                 color: "#00FF41".to_string(),
-                update_ms: 1000,
+                update_ms: 1000, // Matching user's expected default or higher
                 theme: "classic".to_string(),
                 glow_passes: default_glow_passes(),
+                show_monitor_label: true,
             },
             screens: vec![
                 Screen {
@@ -133,13 +198,14 @@ impl Default for Config {
                 }
             ],
             weather: Weather {
-                lat: 51.5074,
-                lon: -0.1278,
+                lat: 0.0,
+                lon: 0.0,
                 enabled: false,
             },
             custom_files: Vec::new(),
             productivity: Productivity::default(),
             cosmetics: Cosmetics::default(),
+            logging: Logging::default(),
         }
     }
 }
@@ -168,6 +234,15 @@ impl Config {
 
         config.validate()?;
         Ok(config)
+    }
+
+    /// Saves configuration to `~/.config/matrix-overlay/config.json`.
+    pub fn save(&self) -> Result<()> {
+        let home = env::var("HOME").context("HOME environment variable not set")?;
+        let config_path = Path::new(&home).join(".config/matrix-overlay/config.json");
+        let json = serde_json::to_string_pretty(self).context("Failed to serialize config")?;
+        fs::write(config_path, json).context("Failed to write config file")?;
+        Ok(())
     }
 
     /// Validates configuration values and safety of provided paths.

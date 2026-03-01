@@ -1,9 +1,10 @@
+// src/render.rs
 use std::collections::HashMap;
 use std::time::Duration;
 use std::cell::RefCell;
 use anyhow::Result;
 use cairo::{Context as CairoContext, Format, ImageSurface, Operator};
-use pangocairo::pango::{FontDescription, Layout as PangoLayout, Weight};
+use pangocairo::pango::{self, FontDescription, Layout as PangoLayout, Weight};
 use xcb::x;
 use rand::Rng;
 use rand::thread_rng;
@@ -27,14 +28,13 @@ pub struct RainStream {
 }
 
 /// Manages the physics and state of the Matrix rain effect.
-///
-/// Ties to Stage 0: Matrix Aesthetics. Implements a multi-layered parallax
-/// effect with Katakana glyphs.
 pub struct RainManager {
     /// Collection of active rain streams.
     pub streams: Vec<RainStream>,
     /// Density of the rain effect (0-10).
     pub realism_scale: u32,
+    /// Detected realism change
+    pub last_realism_scale: u32,
     /// Last known width of the rendering surface.
     pub last_width: i32,
     /// Last known height of the rendering surface.
@@ -46,6 +46,7 @@ impl RainManager {
         Self { 
             streams: Vec::new(), 
             realism_scale,
+            last_realism_scale: realism_scale,
             last_width: 1920,
             last_height: 1080,
         }
@@ -54,7 +55,7 @@ impl RainManager {
     fn reset_streams(&mut self, width: i32, height: i32) {
         let mut rng = thread_rng();
         let count = (self.realism_scale as f64 * (width as f64 / 100.0)) as usize;
-        let count = std::cmp::min(count, 50); // Cap for performance
+        let count = std::cmp::min(count, 500); // Increased cap for realism_scale up to 50
 
         self.streams.clear();
         for _ in 0..count {
@@ -62,7 +63,7 @@ impl RainManager {
                 x: rng.gen_range(0.0..width as f64),
                 y: rng.gen_range(-(height as f64)..0.0),
                 speed: rng.gen_range(2.0..10.0),
-                glyphs: (0..rng.gen_range(5..15)).map(|_| random_katakana()).collect(),
+                glyphs: (0..rng.gen_range(5..15)).map(|_| random_matrix_char()).collect(),
                 depth_scale: rng.gen_range(0.5..1.2),
             });
         }
@@ -70,31 +71,58 @@ impl RainManager {
         self.last_height = height;
     }
 
-    pub fn update(&mut self, dt: Duration, width: i32, height: i32) {
-        if self.streams.is_empty() || width != self.last_width || height != self.last_height {
+    pub fn update(&mut self, dt: Duration, width: i32, height: i32, config: &Config) {
+        if self.streams.is_empty() || width != self.last_width || height != self.last_height || config.cosmetics.realism_scale != self.last_realism_scale {
+            self.realism_scale = config.cosmetics.realism_scale;
+            self.last_realism_scale = config.cosmetics.realism_scale;
             self.reset_streams(width, height);
         }
-        let dy = 60.0 * dt.as_secs_f64();
+
+        if config.cosmetics.rain_speed == 0.0 {
+            // Static effect: No vertical movement, but letters slowly mutation and fade
+            for stream in &mut self.streams {
+                // Occasional mutation even when static
+                if thread_rng().gen_bool(0.01) {
+                    let idx = thread_rng().gen_range(0..stream.glyphs.len());
+                    stream.glyphs[idx] = random_matrix_char();
+                }
+            }
+            return;
+        }
+
+        let dy = 60.0 * dt.as_secs_f64() * config.cosmetics.rain_speed;
         for stream in &mut self.streams {
             stream.y += stream.speed * dy;
             if stream.y > height as f64 + 200.0 {
                 stream.y = -200.0;
-                stream.glyphs = (0..thread_rng().gen_range(5..15)).map(|_| random_katakana()).collect();
+                stream.glyphs = (0..thread_rng().gen_range(5..15)).map(|_| random_matrix_char()).collect();
             }
             // Occasionally mutation
             if thread_rng().gen_bool(0.05) {
                 let idx = thread_rng().gen_range(0..stream.glyphs.len());
-                stream.glyphs[idx] = random_katakana();
+                stream.glyphs[idx] = random_matrix_char();
             }
         }
     }
 
-    pub fn draw(&self, cr: &CairoContext, layout: &PangoLayout, config: &Config) -> Result<()> {
+    pub fn draw(&self, cr: &CairoContext, _width: f64, height: f64, frame_count: u64, config: &Config) -> Result<()> {
         let glyph_size = config.general.font_size as f64 * 0.8;
-        let height = self.last_height as f64;
         
+        if self.streams.is_empty() {
+            log::warn!("RainManager: No streams to draw! Realism scale might be 0.");
+        }
+        
+        // Create local layout for isolation
+        let layout = pangocairo::functions::create_layout(cr);
+        let mut desc = pango::FontDescription::from_string("Monospace");
+
         for stream in &self.streams {
             let alpha_base = stream.depth_scale.powf(2.0);
+            
+            // Configure font size for this stream
+            desc.set_size((glyph_size * stream.depth_scale * pango::SCALE as f64) as i32);
+            layout.set_font_description(Some(&desc));
+
             for (i, &glyph) in stream.glyphs.iter().enumerate() {
                 let y = stream.y - (i as f64 * glyph_size * 1.2);
                 if y < -20.0 || y > height + 20.0 { continue; }
@@ -102,30 +130,35 @@ impl RainManager {
                 let alpha = if i == 0 { 1.0 } else { alpha_base * (1.0 - (i as f64 / stream.glyphs.len() as f64)) };
                 let alpha = alpha.clamp(0.0, 1.0);
 
+                // Static speed 0.0 specific fade-to-black simulation
+                let alpha = if config.cosmetics.rain_speed == 0.0 {
+                    // Pulse-fade over 1.5s (simulated by frame count)
+                    let fc = frame_count as f64;
+                    let pulse = ( (fc * 0.05).sin() * 0.5 ) + 0.5;
+                    alpha * pulse
+                } else {
+                    alpha
+                };
+
                 cr.save()?;
                 let (r, g, b) = match config.general.theme.as_str() {
                     "calm" => (0.0, 0.8, 1.0),
                     "alert" => (1.0, 0.2, 0.2),
-                    _ => (0.0, 1.0, 65.0/255.0), // classic
+                    _ => (0.0, 1.0, 65.0/255.0), // Classic Matrix Green
                 };
-                cr.set_source_rgba(r, g,b, alpha * 0.4); 
+                cr.set_source_rgba(r, g, b, alpha * 0.9 * config.cosmetics.matrix_brightness); // Split brightness applied
                 if i == 0 {
                     let (hr, hg, hb) = match config.general.theme.as_str() {
                         "calm" => (0.8, 0.9, 1.0),
                         "alert" => (1.0, 0.8, 0.8),
-                        _ => (0.8, 1.0, 0.9), // classic
+                        _ => (0.8, 1.0, 0.9), // Bright Green lead
                     };
-                    cr.set_source_rgba(hr, hg, hb, 1.0); // Lead glyph is brighter
+                    cr.set_source_rgba(hr, hg, hb, 1.0 * config.cosmetics.matrix_brightness); // Lead glyph brightness
                 }
 
-                // Optimization: Reuse the passed-in layout
-                let mut desc = pango::FontDescription::from_string("Monospace");
-                desc.set_size((glyph_size * stream.depth_scale * pango::SCALE as f64) as i32);
-                layout.set_font_description(Some(&desc));
                 layout.set_text(&glyph.to_string());
-                
                 cr.move_to(stream.x, y);
-                pangocairo::functions::show_layout(cr, layout);
+                pangocairo::functions::show_layout(cr, &layout);
                 cr.restore()?;
             }
         }
@@ -133,16 +166,13 @@ impl RainManager {
     }
 }
 
-fn random_katakana() -> char {
-    let code = thread_rng().gen_range(0x30A0..0x30FF);
-    std::char::from_u32(code).unwrap_or(' ')
+fn random_matrix_char() -> char {
+    // Use Katakana (0x30A0 - 0x30FF) for authentic Matrix look
+    let code = thread_rng().gen_range(0x30A1..=0x30F6);
+    std::char::from_u32(code).unwrap_or('?')
 }
 
 /// Handles drawing to an offscreen surface and presenting it to the X11 window.
-/// Main rendering engine for the Matrix Overlay.
-///
-/// Handles Cairo surface management, Pango layout caching, and drawing
-/// both the Matrix rain and the system metrics.
 pub struct Renderer {
     /// The target Cairo image surface.
     pub surface: ImageSurface,
@@ -162,10 +192,10 @@ pub struct Renderer {
     scroll_offsets: RefCell<HashMap<String, f64>>,
     /// manager for the background rain effect.
     rain_manager: RainManager,
-    /// Cached Pango layout to avoid expensive re-creation.
-    pango_layout: PangoLayout,
     /// Monotonically increasing frame counter for animations.
     frame_count: RefCell<u64>,
+    /// State of items for logging
+    pub item_states: RefCell<Vec<crate::logging::ItemState>>,
 }
 
 impl Renderer {
@@ -190,9 +220,7 @@ impl Renderer {
         let color_rgb = parse_hex_color(&config.general.color)?;
 
         let cr = CairoContext::new(&surface)?;
-        let pango_layout = pangocairo::functions::create_layout(&cr);
-        pango_layout.set_font_description(Some(&font_desc));
-
+        
         let renderer = Self {
             surface,
             base_font_desc: font_desc,
@@ -203,8 +231,8 @@ impl Renderer {
             monitor_index,
             scroll_offsets: RefCell::new(HashMap::new()),
             rain_manager: RainManager::new(config.cosmetics.realism_scale),
-            pango_layout,
             frame_count: RefCell::new(0),
+            item_states: RefCell::new(Vec::new()),
         };
         
         // Initial clear
@@ -257,14 +285,35 @@ impl Renderer {
 
         // Update physics
         self.rain_manager.update(
-            Duration::from_millis(config.general.update_ms),
+            Duration::from_millis(33), // Fixed 30 FPS delta (approx 33ms)
             self.surface.width(),
-            self.surface.height()
+            self.surface.height(),
+            config
         );
+
+        // Clear item states for this frame
+        self.item_states.borrow_mut().clear();
 
         // 1. Draw Rain
         if config.cosmetics.rain_mode == "fall" {
-            self.rain_manager.draw(&cr, &self.pango_layout, config)?;
+            self.rain_manager.draw(&cr, self.width as f64, self.height as f64, *self.frame_count.borrow(), config)?;
+            
+            // Log rain positions (sampled for performance)
+            if config.logging.enabled {
+                let mut states = self.item_states.borrow_mut();
+                for (i, stream) in self.rain_manager.streams.iter().enumerate() {
+                    if i % 5 == 0 { // Only log every 5th stream to save space
+                        states.push(crate::logging::ItemState {
+                            id: format!("rain_{}", i),
+                            item_type: "rain".to_string(),
+                            x: stream.x,
+                            y: stream.y,
+                            width: 10.0, // approx
+                            height: 10.0,
+                        });
+                    }
+                }
+            }
         } else if config.cosmetics.rain_mode == "pulse" {
             // Optimization: Pulse Mode (Very low CPU)
             let pulse = ( (frame_count as f64 * 0.05).sin() * 0.2 ) + 0.3;
@@ -281,12 +330,37 @@ impl Renderer {
             cr.restore()?;
         }
 
-        // Header and metrics reuse self.pango_layout
-        self.pango_layout.set_font_description(Some(&self.base_font_desc));
-
-        // Always render Day of Week first (Header) at top-center
         if let Some(MetricValue::String(dow)) = metrics.values.get(&MetricId::DayOfWeek) {
-            self.draw_day_of_week(&cr, &self.pango_layout, dow, 100.0, &config.general.glow_passes, config)?;
+            let header_text = if config.general.show_monitor_label {
+                format!("{} (Monitor {})", dow, self.monitor_index + 1)
+            } else {
+                dow.to_string()
+            };
+
+            // Calculate Box dimensions
+            let box_w = 400.0;
+            let box_h = config.general.font_size as f64 * 3.0; // Dynamic box height
+            let box_x = (self.width as f64 - box_w) / 2.0;
+            let box_y = 60.0; // Moved slightly up for better aesthetic
+
+            // Draw occlusion box
+            if config.cosmetics.occlusion_enabled {
+                self.draw_occlusion_box(&cr, box_x, box_y, box_w, box_h, config)?;
+            }
+            
+            self.draw_day_of_week(&cr, &header_text, box_x, box_y, box_w, box_h, &config.general.glow_passes, config)?;
+            
+            if config.logging.enabled {
+                let (w, h) = (200.0, 40.0 * 1.8); // Appoximate size for Day of Week
+                self.item_states.borrow_mut().push(crate::logging::ItemState {
+                    id: "day_of_week".to_string(),
+                    item_type: "metric".to_string(),
+                    x: (self.width as f64 - 200.0) / 2.0, // approx center
+                    y: 100.0,
+                    width: w,
+                    height: h,
+                });
+            }
         }
 
         // Iterate over layout items and draw them
@@ -306,16 +380,11 @@ impl Renderer {
                     let value_str = self.format_metric_value(value);
                     
                     // 2. Draw Occlusion Box if enabled
+                    let box_h = config.general.metric_font_size as f64 * 1.5;
                     if config.cosmetics.occlusion_enabled {
-                        self.draw_occlusion_box(&cr, item.x as f64 - 5.0, item.y as f64 - 2.0, item.max_width as f64 + 10.0, 24.0)?;
+                        self.draw_occlusion_box(&cr, item.x as f64 - 5.0, item.y as f64 - 2.0, item.max_width as f64 + 10.0, box_h, config)?;
                     }
 
-                    // Use MetricId label for consistency (e.g. "CPU", "RAM %")
-                    // For Custom metrics, we might want to use the label from the config if available, 
-                    // but here we use the ID or the logic inside MetricId::label().
-                    // If it's a custom file, the ID is "server_log", label is "server_log".
-                    // To get a pretty name, the user can use the "label" field in the layout config (which is passed as `item.label` here but we overwrite it below).
-                    // Actually, let's prefer the layout item's label if it's set, otherwise fallback to ID.
                     let label = if item.label.is_empty() { id.label() } else { item.label.clone() };
                     
                     // Enable scrolling for network or weather which might be long
@@ -325,7 +394,6 @@ impl Renderer {
 
                     self.draw_metric_pair(
                         &cr,
-                        &self.pango_layout,
                         &label, 
                         &value_str, 
                         item.x as f64, 
@@ -333,23 +401,28 @@ impl Renderer {
                         item.max_width as f64,
                         &item.metric_id,
                         item.clip || allow_scroll,
-                        &config.general.glow_passes
+                        &config.general.glow_passes,
+                        config
                     )?;
+
+                    if config.logging.enabled {
+                        self.item_states.borrow_mut().push(crate::logging::ItemState {
+                            id: item.metric_id.clone(),
+                            item_type: "metric".to_string(),
+                            x: item.x as f64,
+                            y: item.y as f64,
+                            width: item.max_width as f64,
+                            height: 24.0,
+                        });
+                    }
                 } else {
-                    log::warn!("Skipping metric {:?} (No data available)", id);
+                    log::debug!("Skipping metric {:?} (No data available)", id);
                 }
             }
         }
 
-        // Explicitly drop context and layout to release surface lock
+        // Explicitly drop context to release surface lock
         drop(cr);
-
-        // Debug snapshot
-        // if log::log_enabled!(log::Level::Trace) {
-        //      if let Ok(mut file) = std::fs::File::create(format!("/tmp/matrix_overlay_debug_{}.png", self.monitor_index)) {
-        //          let _ = self.surface.write_to_png(&mut file);
-        //      }
-        // }
 
         self.present(conn, window)?;
         Ok(())
@@ -382,24 +455,28 @@ impl Renderer {
     }
 
     /// Draws the Day of Week header, centered and scaled.
-    fn draw_day_of_week(&self, cr: &CairoContext, layout: &PangoLayout, dow: &str, y: f64, glow_passes: &[(f64, f64, f64)], config: &Config) -> Result<()> {
-        log::debug!("Drawing Day of Week: '{}' at y={}", dow, y);
-        // Scale font 1.8x
+    fn draw_day_of_week(&self, cr: &CairoContext, header_text: &str, box_x: f64, box_y: f64, box_w: f64, box_h: f64, glow_passes: &[(f64, f64, f64)], config: &Config) -> Result<()> {
+        log::debug!("Drawing Day of Week: '{}' in box at {},{}", header_text, box_x, box_y);
+        
+        cr.save()?;
+        // Removed cr.identity_matrix() to maintain global scaling consistency
+        
+        let layout = pangocairo::functions::create_layout(cr);
+        
         let mut desc = self.base_font_desc.clone();
         let size = desc.size();
         desc.set_size((size as f64 * 1.8) as i32);
         desc.set_weight(Weight::Bold);
         layout.set_font_description(Some(&desc));
         
-        layout.set_text(dow);
+        layout.set_text(header_text);
+        let (_, logical) = layout.pixel_extents();
+        let text_width = logical.width as f64; 
+        let text_height = logical.height as f64;
         
-        // Calculate center position
-        let (width, _) = layout.pixel_size();
-        let text_width = width as f64; // Pango units are handled by pixel_size helper usually, but here we assume pixels if using cairo-rs helpers correctly or need scaling? 
-        // Actually pango_layout.pixel_size() returns pixels.
-        
-        // Center horizontally in the window
-        let x = (self.width as f64 - text_width) / 2.0;
+        // Center horizontally and vertically within the box
+        let x = box_x + (box_w - text_width) / 2.0;
+        let y = box_y + (box_h - text_height) / 2.0;
         
         // Theme-aware colors
         let theme_color = match config.general.theme.as_str() {
@@ -408,21 +485,16 @@ impl Renderer {
             _ => (0.0, 1.0, 65.0 / 255.0), // classic
         };
         
-        self.draw_text_glow_at(cr, layout, x, y, Some(theme_color), glow_passes)?;
+        self.draw_text_glow_at(cr, &layout, x, y, Some(theme_color), glow_passes, config)?;
         
-        // Reset font
-        layout.set_font_description(Some(&self.base_font_desc));
+        cr.restore()?;
         Ok(())
     }
 
     /// Draws a Label: Value pair.
-    /// Label is left-aligned at `x`.
-    /// Value is right-aligned at `x + max_width`.
-    /// If value is too long and `scroll` is true, it scrolls.
     fn draw_metric_pair(
         &self, 
         cr: &CairoContext,
-        layout: &PangoLayout,
         label: &str, 
         value: &str, 
         x: f64, 
@@ -430,11 +502,25 @@ impl Renderer {
         max_width: f64,
         metric_id: &str,
         allow_scroll: bool,
-        glow_passes: &[(f64, f64, f64)]
+        glow_passes: &[(f64, f64, f64)],
+        config: &Config
     ) -> Result<()> {
+        let layout = pangocairo::functions::create_layout(cr);
+        let mut desc = pango::FontDescription::from_string("Monospace");
+        desc.set_size((config.general.metric_font_size as f64 * pango::SCALE as f64) as i32);
+        layout.set_font_description(Some(&desc));
+
+        let box_h = config.general.metric_font_size as f64 * 1.5;
+        
         // 1. Draw Label
         layout.set_text(label);
-        self.draw_text_glow_at(cr, layout, x, y, None, glow_passes)?;
+        let (_, label_h_px) = layout.pixel_size();
+        let label_h = label_h_px as f64;
+        
+        // Vertical centering: box_h vs label_h
+        let centered_y = y + (box_h - label_h) / 2.0 - 2.0;
+
+        self.draw_text_glow_at(cr, &layout, x, centered_y, None, glow_passes, config)?;
         
         let (label_w_px, _) = layout.pixel_size();
         let label_width = label_w_px as f64;
@@ -445,7 +531,6 @@ impl Renderer {
         let value_width = val_w_px as f64;
 
         // Calculate available space for value
-        // We assume a small padding between label and value if they get close
         let padding = 10.0;
         let value_area_start = x + label_width + padding;
         let value_area_width = max_width - label_width - padding;
@@ -471,41 +556,17 @@ impl Renderer {
             *offset += 0.5;
             
             // Reset if scrolled past
-            // We scroll the text completely out to the left, then reset to right
             let scroll_span = value_width + value_area_width; 
             if *offset > scroll_span {
                 *offset = -value_area_width; // Start entering from right
             }
 
-            // Position: Right aligned base, shifted left by offset
-            // Actually, for scrolling, we usually start right-aligned (visible) then scroll left?
-            // Or marquee style: start at right edge.
-            // Let's do: Start with text right-aligned. If it overflows, we start shifting it left.
-            // But standard marquee moves right-to-left.
-            
-            // Let's define x such that it moves.
-            // Start: x = value_area_start + value_area_width (Just entering)
-            // End: x = value_area_start - value_width (Just exited)
-            
-            // We map offset 0..span to position.
-            // Let's simplify: Just scroll left continuously.
-            // Initial position (offset 0): Right aligned (standard view)
-            // Wait, if it's right aligned and overflows, the left part is cut off.
-            // We probably want to see the start of the string first?
-            // Let's stick to the prompt: "track offset, clamp".
-            
-            // Implementation: Ping-pong or circular?
-            // "track offset, clamp" suggests maybe we scroll to the end and stop?
-            // Let's do a simple marquee: Move left.
-            
             // Override draw_x for scrolling
-            // Start at right edge of area
             draw_x = (x + max_width) - *offset;
             
             // If we have scrolled so far that the text is gone, reset
             if draw_x + value_width < value_area_start {
                  *offset = 0.0; // Reset to start
-                 // Optional: Pause at start? Requires more state.
             }
         } else {
             // Ensure right alignment if fitting, or clamped if not scrolling
@@ -516,34 +577,22 @@ impl Renderer {
         }
 
         // Draw Value
-        // We use a separate draw call because we might have clipped
-        // We need to set the layout text again because draw_text_glow uses it
-        // But wait, draw_text_glow sets text? No, it uses current layout text?
-        // My previous implementation of draw_text_glow took `text` as arg.
-        // Let's check `draw_text_glow` signature in previous file.
-        // `pub fn draw_text_glow(&mut self, text: &str, x: f64, y: f64, alpha_steps: &[f64])`
-        // I should update `draw_text_glow` to use the current layout state or pass text.
-        // I'll assume I can call it.
-        
-        // Note: draw_text_glow in previous prompt took `text`. 
-        // Here I will use a helper that assumes layout is set, or pass text.
-        // Let's use the one that takes text to be safe.
-        self.draw_text_glow_at(cr, layout, draw_x, y, None, glow_passes)?;
+        self.draw_text_glow_at(cr, &layout, draw_x, centered_y, None, glow_passes, config)?;
 
         cr.restore()?; // Restore clip
 
         Ok(())
     }
 
-    /// Helper to draw the current layout content with glow at (x,y).
-    /// Assumes `self.pango_layout` already has the correct text/font set.
-    fn draw_text_glow_at(&self, cr: &CairoContext, layout: &PangoLayout, x: f64, y: f64, color: Option<(f64, f64, f64)>, glow_passes: &[(f64, f64, f64)]) -> Result<()> {
+    fn draw_text_glow_at(&self, cr: &CairoContext, layout: &PangoLayout, x: f64, y: f64, color: Option<(f64, f64, f64)>, glow_passes: &[(f64, f64, f64)], config: &Config) -> Result<()> {
         let (r, g, b) = color.unwrap_or(self.color_rgb);
+        let global_brightness = config.cosmetics.metrics_brightness;
 
         for (ox, oy, alpha) in glow_passes {
             cr.save()?;
             cr.translate(x + ox, y + oy);
-            cr.set_source_rgba(r, g, b, *alpha);
+            cr.move_to(0.0, 0.0); // CRITICAL FIX: Reset current point for Cairo/Pango
+            cr.set_source_rgba(r, g, b, *alpha * global_brightness);
             pangocairo::functions::show_layout(cr, layout);
             cr.restore()?;
         }
@@ -551,18 +600,28 @@ impl Renderer {
         // Main Text
         cr.save()?;
         cr.translate(x, y);
-        cr.set_source_rgba(r, g, b, 1.0);
+        cr.move_to(0.0, 0.0); // CRITICAL FIX: Reset current point for Cairo/Pango
+        cr.set_source_rgba(r, g, b, 1.0 * global_brightness);
         pangocairo::functions::show_layout(cr, layout);
         cr.restore()?;
 
         Ok(())
     }
 
-    fn draw_occlusion_box(&self, cr: &CairoContext, x: f64, y: f64, w: f64, h: f64) -> Result<()> {
+    fn draw_occlusion_box(&self, cr: &CairoContext, x: f64, y: f64, w: f64, h: f64, config: &Config) -> Result<()> {
         cr.save()?;
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.7); // Semi-transparent black
+        cr.set_source_rgba(0.0, 0.0, 0.0, config.cosmetics.background_opacity); 
         cr.rectangle(x, y, w, h);
         cr.fill()?;
+
+        if config.cosmetics.border_enabled {
+            let border_color = parse_hex_color(&config.cosmetics.border_color).unwrap_or((0.0, 1.0, 65.0/255.0));
+            cr.set_source_rgb(border_color.0, border_color.1, border_color.2);
+            cr.set_line_width(1.0);
+            cr.rectangle(x, y, w, h);
+            cr.stroke()?;
+        }
+
         cr.restore()?;
         Ok(())
     }

@@ -1,6 +1,6 @@
 [package]
 name = "matrix-overlay"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
@@ -19,6 +19,7 @@ thiserror = "1.0"
 env_logger = "0.10"
 log = "0.4"
 crossbeam-channel = "0.5"
+simplelog = "0.12"
 git2 = "0.18"
 ollama-rs = "0.1"
 
