@@ -6,3 +6,7 @@ pub mod tray;
 pub mod window;
 pub mod timer;
 pub mod path_utils;
+pub mod logging;
+pub mod version;
+pub mod build_logger;
+pub mod gui;

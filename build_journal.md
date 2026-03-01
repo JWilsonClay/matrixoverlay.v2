@@ -1,5 +1,13 @@
 # Build Journal
 
+## [2026-02-27] Runtime Verification (Visuals & Layering)
+- **Summary**: User verified the binary `target/release/matrix-overlay`.
+- **Success**: Layering is correct (Behind icons, click-through works). Fonts and colors render correctly.
+- **Issues**:
+  1. **Tray Menu**: Clicking the icon does not open the menu. Log shows `LIBDBUSMENU-GLIB-WARNING`, suggesting an empty or detached menu structure.
+  2. **Rain Effect**: User expected Matrix rain, but only sees static text. This is likely a configuration default or Stage 1 limitation.
+- **Action**: Need to inspect `src/tray.rs` and `src/main.rs` to fix the menu event handling.
+
 ## [2026-01-30] Directive 2 Stage 6: User Verification & Feature Audit
 - **Summary**: User confirmed "Day of Week" header is now visible and CPU/RAM metrics are working. User inquired about other non-working features.
 - **Diagnosis**:

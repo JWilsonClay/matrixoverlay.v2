@@ -1,0 +1,12 @@
+   Compiling matrix-overlay v0.1.1 (/home/jwils/matrixoverlay.v2)
+warning: unused variable: `layout`
+  --> src/render.rs:93:13
+   |
+93 |         let layout = pangocairo::functions::create_layout(cr);
+   |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_layout`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: `matrix-overlay` (lib) generated 1 warning
+warning: `matrix-overlay` (bin "matrix-overlay") generated 1 warning (1 duplicate)
+    Finished `release` profile [optimized] target(s) in 38.77s

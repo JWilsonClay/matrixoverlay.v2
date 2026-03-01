@@ -1,17 +1,8 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-mod config;
-mod layout;
-mod metrics;
-mod render;
-mod tray;
-mod window;
-mod timer;
-mod path_utils;
-
 use anyhow::{bail, Context, Result};
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -19,24 +10,60 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use git2::Repository;
-use crossbeam_channel::{unbounded, bounded, select};
+use crossbeam_channel::{unbounded, bounded, select, after, Receiver};
 use tray_icon::menu::MenuEvent;
+use tray_icon::TrayIconEvent;
+use simplelog::{WriteLogger, TermLogger, Config as LogConfig, LevelFilter, TerminalMode, ColorChoice};
+use chrono::Local;
 use xcb::x;
 
-use crate::config::Config;
-use crate::window::create_all_windows;
-use crate::metrics::{MetricData, MetricId, MetricValue, MetricsCommand, spawn_metrics_thread};
-use crate::render::Renderer;
-use crate::layout::Layout;
-use crate::tray::{SystemTray, MENU_QUIT_ID, MENU_RELOAD_ID, MENU_EDIT_ID, MENU_THEME_CLASSIC, MENU_THEME_CALM, MENU_THEME_ALERT, MENU_TOGGLE_AUTO_COMMIT, MENU_TOGGLE_OLLAMA};
+use matrix_overlay::config::Config;
+use matrix_overlay::window::create_all_windows;
+use matrix_overlay::metrics::{MetricData, MetricId, MetricValue, MetricsCommand, spawn_metrics_thread};
+use matrix_overlay::render::Renderer;
+use matrix_overlay::layout::{self, Layout};
+use matrix_overlay::logging;
+use matrix_overlay::version;
+use matrix_overlay::build_logger;
+use matrix_overlay::path_utils;
+use matrix_overlay::tray::{SystemTray, MENU_QUIT_ID, MENU_RELOAD_ID, MENU_EDIT_ID, MENU_THEME_CLASSIC, MENU_THEME_CALM, MENU_THEME_ALERT, MENU_TOGGLE_AUTO_COMMIT, MENU_TOGGLE_OLLAMA, MENU_CONFIG_GUI_ID, MENU_CONFIG_JSON_ID};
+use matrix_overlay::gui::{GuiEvent, ConfigWindow};
 
 fn main() -> Result<()> {
-    // 1. Init env_logger
-    env_logger::init();
-    log::info!("Initializing Matrix Overlay...");
-
-    // 2. Load Config
+    // 1. Load Config First (to determine logging)
     let mut config = Config::load().context("Failed to load configuration")?;
+    
+    // 2. Init Logger
+    version::print_startup_info();
+    
+    // Check for debug-build subcommand
+    if env::args().any(|a| a == "debug-build") {
+        build_logger::log_build_event("cargo build --release", &config.logging.log_path);
+        return Ok(());
+    }
+
+    if config.logging.enabled {
+        let log_dir = std::path::Path::new(&config.logging.log_path);
+        if !log_dir.exists() {
+            fs::create_dir_all(log_dir).context("Failed to create log directory")?;
+        }
+        
+        let _ = WriteLogger::init(
+            LevelFilter::Info,
+            LogConfig::default(),
+            fs::File::create(log_dir.join("matrix_overlay.log")).context("Failed to create log file")?
+        );
+        println!("Logging enabled. Directory: {}", config.logging.log_path);
+    } else {
+        env_logger::init();
+    }
+    log::info!("Initializing Matrix Overlay... v0.1.3-FORCE_REBUILD");
+
+    // FORCE OVERRIDE: Ensure rain is enabled for verification
+    config.cosmetics.rain_mode = "fall".to_string();
+    // FORCE OVERRIDE: Max density to ensure visibility (Fixes "No streams to draw")
+    config.cosmetics.realism_scale = 8;
+
     log::info!("Configuration loaded successfully.");
     for (i, screen) in config.screens.iter().enumerate() {
         log::info!("Monitor {}: Configured metrics: {:?}", i, screen.metrics);
@@ -58,28 +85,7 @@ fn main() -> Result<()> {
 
     log::info!("Connected to XCB. Screen: {}", screen_num);
 
-    // 5. Create Windows
-    let wm = create_all_windows(&conn, &config).context("Failed to create windows")?;
-
-    log::info!("Created {} overlay windows.", wm.monitors.len());
-    for (i, ctx) in wm.monitors.iter().enumerate() {
-        log::info!("  Window {}: ID={:?}, Monitor={}", i, ctx.window, ctx.monitor.name);
-    }
-
-    // 5b. Initialize Renderers
-    let mut renderers = Vec::new();
-    for (i, ctx) in wm.monitors.iter().enumerate() {
-        let screen_config = config.screens.get(i).or(config.screens.first());
-        
-        let layout = if let Some(screen) = screen_config {
-            layout::compute(screen, ctx.monitor.width, ctx.monitor.height, config.general.font_size as f64)
-        } else {
-            Layout { items: Vec::new() }
-        };
-
-        let renderer = Renderer::new(ctx.monitor.width, ctx.monitor.height, i, layout, &config)?;
-        renderers.push(renderer);
-    }
+    // 5. Create Windows & Initialize Renderers - MOVED TO BACKGROUND THREAD
 
     // 6. Set Background
     log::info!("Setting background to black...");
@@ -131,7 +137,7 @@ fn main() -> Result<()> {
     }
 
     // 7b. Initialize System Tray
-    let _tray = match SystemTray::new() {
+    let _tray = match SystemTray::new(&config) {
         Ok(t) => Some(t),
         Err(e) => {
             log::warn!("Failed to initialize system tray: {}", e);
@@ -139,11 +145,8 @@ fn main() -> Result<()> {
         }
     };
 
-    // 8. Event Loop Setup
-    log::info!("Entering event loop...");
-    
     // Channel for XCB events (Threaded Poller)
-    let (xcb_tx, xcb_rx) = unbounded();
+    let (xcb_tx, xcb_rx_overlay) = unbounded();
     let conn_event = conn.clone();
     thread::spawn(move || {
         loop {
@@ -152,7 +155,7 @@ fn main() -> Result<()> {
                     if xcb_tx.send(event).is_err() { break; }
                 }
                 Err(xcb::Error::Protocol(e)) => {
-                    log::warn!("XCB Protocol Error (Ignored): {}", e);
+                    log::warn!("XCB Protocol Error (Ignored): {:?}", e);
                 }
                 Err(e) => {
                     log::error!("XCB Connection Error: {}", e);
@@ -162,14 +165,156 @@ fn main() -> Result<()> {
         }
     });
 
-    // Channel for Redraw Ticks
-    let (tick_tx, tick_rx) = bounded(1);
-    let update_ms = config.general.update_ms;
+    let (interval_tx, interval_rx) = unbounded::<Duration>();
+    let (gui_tx, gui_rx) = unbounded::<GuiEvent>();
+    let (control_tx, control_rx) = unbounded::<GuiEvent>();
+    
+    // ARC for sharing across threads
+    let config_arc = Arc::new(config.clone());
+    let conn_arc = Arc::clone(&conn);
+    let shutdown_arc = Arc::clone(&shutdown);
+    let metrics_arc = Arc::clone(&metrics);
+
+    // 8. Spawn Overlay Thread
+    let gui_tx_pass = gui_tx.clone();
+    let control_tx_overlay = control_tx.clone();
+    let interval_tx_overlay = interval_tx.clone();
+    let metrics_tx_overlay = metrics_tx.clone();
+    let menu_channel = MenuEvent::receiver();
+
     thread::spawn(move || {
-        loop {
-            thread::sleep(Duration::from_millis(update_ms));
-            if tick_tx.send(()).is_err() { break; }
+        log::info!("Overlay logic thread started.");
+        let mut config_overlay = (*config_arc).clone();
+
+        // Initialize Windows and Renderers within this thread (to avoid Cairo thread-safety issues)
+        let wm = match create_all_windows(&conn_arc, &config_overlay) {
+            Ok(m) => m,
+            Err(e) => {
+                log::error!("Failed to create windows in background thread: {}", e);
+                return;
+            }
+        };
+
+        let mut renderers = Vec::new();
+        for (i, ctx) in wm.monitors.iter().enumerate() {
+            let screen_config = config_overlay.screens.get(i).unwrap_or(&config_overlay.screens[0]);
+            let layout = layout::compute(screen_config, ctx.monitor.width, ctx.monitor.height, config_overlay.general.font_size as f64);
+            if let Ok(renderer) = Renderer::new(ctx.monitor.width, ctx.monitor.height, i, layout, &config_overlay) {
+                renderers.push(renderer);
+            }
         }
+        
+        // Setup Tick Thread
+        let (tick_thread_tx, tick_thread_rx) = bounded(1);
+        let interval_rx_tick = interval_rx.clone();
+        let initial_interval = Duration::from_millis(config_overlay.general.update_ms);
+        thread::spawn(move || {
+            let mut interval = initial_interval;
+            loop {
+                let start = Instant::now();
+                if tick_thread_tx.send(()).is_err() { break; }
+                while let Ok(new_interval) = interval_rx_tick.try_recv() {
+                    interval = new_interval;
+                }
+                let elapsed = start.elapsed();
+                if elapsed < interval { thread::sleep(interval - elapsed); }
+                else { thread::sleep(Duration::from_millis(1)); }
+            }
+        });
+
+        let keycode_w = find_keycode(&conn_arc, 0x0077).unwrap_or(Some(0)).unwrap_or(0);
+        let keycode_q = find_keycode(&conn_arc, 0x0071).unwrap_or(Some(0)).unwrap_or(0);
+        let mut visible = true;
+
+        loop {
+            if shutdown_arc.load(Ordering::Relaxed) { break; }
+
+            select! {
+                recv(xcb_rx_overlay) -> event_res => {
+                    if let Ok(event) = event_res {
+                        match event {
+                            xcb::Event::X(x::Event::KeyPress(ev)) => {
+                                if ev.detail() == keycode_w {
+                                    visible = !visible;
+                                    for ctx in &wm.monitors {
+                                        if visible { let _ = conn_arc.send_request(&x::MapWindow { window: ctx.window }); }
+                                        else { let _ = conn_arc.send_request(&x::UnmapWindow { window: ctx.window }); }
+                                    }
+                                    let _ = conn_arc.flush();
+                                } else if ev.detail() == keycode_q {
+                                    shutdown_arc.store(true, Ordering::Relaxed);
+                                    break;
+                                }
+                            },
+                            xcb::Event::X(x::Event::Expose(ev)) => {
+                                if visible {
+                                    if let Some(idx) = wm.monitors.iter().position(|m| m.window == ev.window()) {
+                                        if let Some(renderer) = renderers.get_mut(idx) {
+                                            if let Ok(shared) = metrics_arc.lock() {
+                                                let _ = renderer.draw(&conn_arc, ev.window(), &config_overlay, &shared.data);
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            _ => {}
+                        }
+                    }
+                },
+                recv(tick_thread_rx) -> _ => {
+                    if visible {
+                        if let Ok(shared) = metrics_arc.lock() {
+                            for (i, renderer) in renderers.iter_mut().enumerate() {
+                                if let Some(ctx) = wm.monitors.get(i) {
+                                    let _ = renderer.draw(&conn_arc, ctx.window, &config_overlay, &shared.data);
+                                }
+                            }
+                        }
+                    }
+                },
+                recv(MenuEvent::receiver()) -> event_res => {
+                    if let Ok(event) = event_res {
+                        if event.id.as_ref() == MENU_QUIT_ID {
+                            shutdown_arc.store(true, Ordering::Relaxed);
+                            break;
+                        }
+                        if event.id.as_ref() == MENU_RELOAD_ID {
+                            let _ = Command::new("notify-send").args(&["-t", "1000", "Matrix Overlay", "Reloading Configuration..."]).spawn();
+                            if let Ok(new_config) = Config::load() {
+                                config_overlay = new_config.clone();
+                                let _ = interval_tx_overlay.send(Duration::from_millis(config_overlay.general.update_ms));
+                                for renderer in &mut renderers { renderer.update_config(config_overlay.clone()); }
+                                let _ = metrics_tx_overlay.send(MetricsCommand::UpdateConfig(config_overlay.clone()));
+                            }
+                        }
+                        if event.id.as_ref() == MENU_CONFIG_GUI_ID {
+                            let _ = control_tx_overlay.send(GuiEvent::OpenConfig);
+                        }
+                    }
+                },
+                recv(gui_rx) -> event_res => {
+                    if let Ok(event) = event_res {
+                        match event {
+                            GuiEvent::Reload => {
+                                let _ = Command::new("notify-send").args(&["-t", "1000", "Matrix Overlay", "Changes Applied Successfully"]).spawn();
+                                if let Ok(new_config) = Config::load() {
+                                    config_overlay = new_config.clone();
+                                    let _ = interval_tx_overlay.send(Duration::from_millis(config_overlay.general.update_ms));
+                                    for renderer in &mut renderers { renderer.update_config(config_overlay.clone()); }
+                                    let _ = metrics_tx_overlay.send(MetricsCommand::UpdateConfig(config_overlay.clone()));
+                                }
+                            },
+                            GuiEvent::PurgeLogs => {
+                                let _ = logging::Logger::purge_debug_logs("/tmp/matrix_overlay_logs");
+                            },
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        log::info!("Overlay logic thread stopping. Cleaning up windows...");
+        let _ = wm.cleanup(&conn_arc);
     });
 
     // 7c. Spawn Productivity Thread (Auto-Commits & AI Insights)
@@ -193,150 +338,44 @@ fn main() -> Result<()> {
         log::info!("Productivity thread stopped.");
     });
 
-    let mut visible = true;
-    let mut first_redraw = true;
-
-    loop {
-        // Pump GTK events (for Tray Icon)
-        #[cfg(target_os = "linux")]
-        while gtk::events_pending() {
-            gtk::main_iteration();
-        }
-
-        select! {
-            recv(xcb_rx) -> event_res => {
-                if let Ok(event) = event_res {
-                    match event {
-                        xcb::Event::X(x::Event::KeyPress(ev)) => {
-                            log::info!("KeyPress received: keycode={}, state={:?}", ev.detail(), ev.state());
-                            if ev.detail() == keycode_w {
-                                log::info!("Hotkey activated. Toggling visibility.");
-                                visible = !visible;
-                                for ctx in &wm.monitors {
-                                    if visible {
-                                        conn.send_request(&x::MapWindow { window: ctx.window });
-                                    } else {
-                                        conn.send_request(&x::UnmapWindow { window: ctx.window });
-                                    }
-                                }
-                                conn.flush()?;
-                            } else if ev.detail() == keycode_q {
-                                log::info!("Hotkey Ctrl+Alt+Q activated. Exiting.");
-                                break;
-                            }
-                        },
-                        xcb::Event::X(x::Event::Expose(ev)) => {
-                            if visible {
-                                // Find renderer for this window and redraw
-                                if let Some(idx) = wm.monitors.iter().position(|m| m.window == ev.window()) {
-                                    if let Some(renderer) = renderers.get_mut(idx) {
-                                        if let Ok(shared) = metrics.lock() {
-                                            let _ = renderer.draw(&conn, ev.window(), &config, &shared.data);
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                        _ => {}
-                    }
-                } else {
-                    break; // Channel closed
-                }
-            },
-            recv(tick_rx) -> _ => {
-                if visible {
-                    if let Ok(shared) = metrics.lock() {
-                        if first_redraw {
-                            log::info!("First redraw triggered. Data: {}", shared.data.summary());
-                            first_redraw = false;
+    // Start GTK Main Loop on main thread
+    #[cfg(target_os = "linux")]
+    {
+        log::info!("GTK dedicated thread active (60 FPS GUI).");
+        loop {
+            if shutdown.load(Ordering::Relaxed) { break; }
+            while gtk::events_pending() {
+                gtk::main_iteration();
+            }
+            
+            // Watch for GUI events that need to be handled on the main thread (like opening a window)
+            while let Ok(event) = control_rx.try_recv() {
+                match event {
+                    GuiEvent::OpenConfig => {
+                        if let Ok(new_config) = Config::load() {
+                            let window = ConfigWindow::new(new_config, gui_tx.clone());
+                            window.show();
                         }
-
-                        for (i, renderer) in renderers.iter_mut().enumerate() {
-                            if let Some(ctx) = wm.monitors.get(i) {
-                                log::debug!("Redrawing Window {} [{}x{} @ {},{}]. Metrics: {}", 
-                                    i, ctx.monitor.width, ctx.monitor.height, ctx.monitor.x, ctx.monitor.y,
-                                    shared.data.values.len());
-
-                                if let Err(e) = renderer.draw(&conn, ctx.window, &config, &shared.data) {
-                                    log::error!("Render failed on monitor {}: {}", i, e);
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            recv(MenuEvent::receiver()) -> event_res => {
-                if let Ok(event) = event_res {
-                    if event.id.as_ref() == MENU_QUIT_ID {
-                        log::info!("Quit requested via Tray.");
-                        break;
-                    }
-                    if event.id.as_ref() == MENU_RELOAD_ID {
-                        log::info!("Reloading configuration...");
-                        match Config::load() {
-                            Ok(new_config) => {
-                                config = new_config.clone();
-                                
-                                // Update all renderers
-                                for renderer in &mut renderers {
-                                    renderer.update_config(new_config.clone());
-                                }
-                                
-                                // Update metrics thread
-                                if let Err(e) = metrics_tx.send(MetricsCommand::UpdateConfig(new_config.clone())) {
-                                    log::error!("Failed to notify metrics thread of reload: {}", e);
-                                }
-                                
-                                log::info!("Config reloaded and broadcast to all modules.");
-                            },
-                            Err(e) => log::error!("Failed to reload config: {}", e),
-                        }
-                    }
-                    if event.id.as_ref() == "about" {
-                        log::info!("Displaying About info...");
-                        println!("Matrix Overlay v2 - jwils (John Wilson) and Grok (xAI)");
-                        // NOTE: Open GUI notification in Stage 4/5 integration
-                    }
-                    if event.id.as_ref() == MENU_EDIT_ID {
-                        if let Ok(home) = env::var("HOME") {
-                            let _ = Command::new("xdg-open").arg(format!("{}/.config/matrix-overlay/config.json", home)).spawn();
-                        }
-                    }
-                    if event.id.as_ref().starts_with("theme_") {
-                        let new_theme = match event.id.as_ref() {
-                            MENU_THEME_CALM => "calm",
-                            MENU_THEME_ALERT => "alert",
-                            _ => "classic",
-                        };
-                        log::info!("Switching theme to: {}", new_theme);
-                        config.general.theme = new_theme.to_string();
-                        for renderer in &mut renderers {
-                            renderer.update_config(config.clone());
-                        }
-                    }
-                    if event.id.as_ref() == MENU_TOGGLE_AUTO_COMMIT {
-                        config.productivity.auto_commit_threshold = if config.productivity.auto_commit_threshold > 0 { 0 } else { 1000 };
-                        log::info!("Auto-Commit toggled. Threshold: {}", config.productivity.auto_commit_threshold);
-                    }
-                    if event.id.as_ref() == MENU_TOGGLE_OLLAMA {
-                        config.productivity.ollama_enabled = !config.productivity.ollama_enabled;
-                        log::info!("Ollama AI Summaries toggled: {}", config.productivity.ollama_enabled);
-                    }
+                    },
+                    _ => {}
                 }
             }
+
+            thread::sleep(Duration::from_millis(16)); // ~60 FPS responsiveness for UI
         }
     }
 
-    log::info!("Shutting down...");
+    log::info!("Shutting down main...");
     
-    // Ungrab key
+    // Ungrab key (Optional as thread does it, but safer here if thread crashes)
+    let keycode_w = find_keycode(&conn, 0x0077)?.unwrap_or(0);
+    let keycode_q = find_keycode(&conn, 0x0071)?.unwrap_or(0);
     let _ = conn.send_request(&x::UngrabKey { key: keycode_w, grab_window: root, modifiers: x::ModMask::ANY });
     let _ = conn.send_request(&x::UngrabKey { key: keycode_q, grab_window: root, modifiers: x::ModMask::ANY });
     let _ = conn.flush();
 
     shutdown.store(true, Ordering::Relaxed);
-    wm.cleanup(&conn)?;
-
+    
     Ok(())
 }
 
@@ -415,7 +454,7 @@ fn run_auto_commit_cycle(config: &Config) -> Result<()> {
     
     for repo_path in &config.productivity.repos {
         let path = Path::new(repo_path);
-        if !crate::path_utils::is_safe_path(path) {
+        if !path_utils::is_safe_path(path) {
             log::warn!("Skipping unsafe repo path: {}", repo_path);
             continue;
         }

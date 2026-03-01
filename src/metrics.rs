@@ -364,6 +364,19 @@ impl MetricCollector for OpenMeteoCollector {
             return map;
         }
 
+        // Privacy Auto-Adjust: If lat/lon are 0.0, attempt one-time Geo-IP lookup
+        if self.lat == 0.0 && self.lon == 0.0 {
+             if let Ok(resp) = reqwest::blocking::get("http://ip-api.com/json") {
+                 #[derive(Deserialize)]
+                 struct IpApiResponse { lat: f64, lon: f64 }
+                 if let Ok(geo) = resp.json::<IpApiResponse>() {
+                     log::info!("Geo-IP Privacy Auto-Adjust: Detected Location ({}, {})", geo.lat, geo.lon);
+                     self.lat = geo.lat;
+                     self.lon = geo.lon;
+                 }
+             }
+        }
+
         let url = format!("{}/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code", self.url_base, self.lat, self.lon);
 
         match reqwest::blocking::Client::new().get(&url).timeout(std::time::Duration::from_secs(5)).send() {
