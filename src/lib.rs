@@ -1,5 +1,8 @@
 pub mod config;
 pub mod layout;
+#[path = "metrics.rs"]
+pub mod metrics_old;
+#[path = "metrics/mod.rs"]
 pub mod metrics;
 pub mod render;
 pub mod tray;
@@ -14,7 +17,5 @@ pub mod gui;
 // --- REFACTOR BRIDGES (Phase 1) ---
 pub mod core;
 pub mod ui;
-#[path = "metrics/shim.rs"]
-pub mod metrics_bridge;
 #[path = "render/shim.rs"]
 pub mod render_bridge;
