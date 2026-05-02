@@ -20,10 +20,27 @@ pub struct General {
     pub glow_passes: Vec<(f64, f64, f64)>,
     #[serde(default = "default_true")]
     pub show_monitor_label: bool,
+    #[serde(default = "default_spacing")]
+    pub metric_spacing: i32,
+    #[serde(default = "default_columns")]
+    pub metric_columns: u32,
+    #[serde(default = "default_alignment")]
+    pub metric_alignment: String,
+    #[serde(default = "default_label_spacing")]
+    pub label_value_spacing: i32,
+    #[serde(default)]
+    pub show_cpu_metric: bool,
+    #[serde(default = "default_temp_unit")]
+    pub temp_unit: String,
 }
 
-fn default_metric_font_size() -> u32 { 14 }
+fn default_label_spacing() -> i32 { 10 }
+fn default_temp_unit() -> String { "celsius".to_string() }
 
+fn default_metric_font_size() -> u32 { 14 }
+fn default_spacing() -> i32 { 24 }
+fn default_columns() -> u32 { 1 }
+fn default_alignment() -> String { "left".to_string() }
 fn default_theme() -> String { "classic".to_string() }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -38,7 +55,11 @@ pub struct Weather {
     pub lat: f64,
     pub lon: f64,
     pub enabled: bool,
+    #[serde(default = "default_false")]
+    pub auto_location: bool,
 }
+
+fn default_false() -> bool { false }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CustomFile {
@@ -103,17 +124,20 @@ pub struct Cosmetics {
     /// Opacity of the metric background box
     #[serde(default = "default_bg_opacity")]
     pub background_opacity: f64,
+    /// Last used performance preset (minimal, medium, extreme)
+    #[serde(default = "default_preset")]
+    pub perf_preset: String,
 }
 
 fn default_rain_speed() -> f64 { 1.0 }
 fn default_brightness() -> f64 { 0.9 }
 fn default_border_color() -> String { "#00FF41".to_string() }
 fn default_bg_opacity() -> f64 { 0.7 }
+fn default_preset() -> String { "medium".to_string() }
 
 fn default_rain_mode() -> String { "fall".to_string() }
 fn default_realism() -> u32 { 10 }
 fn default_true() -> bool { true }
-fn default_false() -> bool { false }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Logging {
@@ -182,6 +206,12 @@ impl Default for Config {
                 theme: "classic".to_string(),
                 glow_passes: default_glow_passes(),
                 show_monitor_label: true,
+                metric_spacing: 24,
+                metric_columns: 1,
+                metric_alignment: "left".to_string(),
+                label_value_spacing: 10,
+                show_cpu_metric: false,
+                temp_unit: "celsius".to_string(),
             },
             screens: vec![
                 Screen {
@@ -201,6 +231,7 @@ impl Default for Config {
                 lat: 0.0,
                 lon: 0.0,
                 enabled: false,
+                auto_location: false,
             },
             custom_files: Vec::new(),
             productivity: Productivity::default(),

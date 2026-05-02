@@ -165,7 +165,7 @@ fn main() -> Result<()> {
         }
     });
 
-    let (interval_tx, interval_rx) = unbounded::<Duration>();
+    let (interval_tx, _interval_rx) = unbounded::<Duration>();
     let (gui_tx, gui_rx) = unbounded::<GuiEvent>();
     let (control_tx, control_rx) = unbounded::<GuiEvent>();
     
@@ -176,11 +176,11 @@ fn main() -> Result<()> {
     let metrics_arc = Arc::clone(&metrics);
 
     // 8. Spawn Overlay Thread
-    let gui_tx_pass = gui_tx.clone();
+    let _gui_tx_pass = gui_tx.clone();
     let control_tx_overlay = control_tx.clone();
     let interval_tx_overlay = interval_tx.clone();
     let metrics_tx_overlay = metrics_tx.clone();
-    let menu_channel = MenuEvent::receiver();
+    let _menu_channel_poller = MenuEvent::receiver();
 
     thread::spawn(move || {
         log::info!("Overlay logic thread started.");
@@ -197,25 +197,19 @@ fn main() -> Result<()> {
 
         let mut renderers = Vec::new();
         for (i, ctx) in wm.monitors.iter().enumerate() {
-            let screen_config = config_overlay.screens.get(i).unwrap_or(&config_overlay.screens[0]);
-            let layout = layout::compute(screen_config, ctx.monitor.width, ctx.monitor.height, config_overlay.general.font_size as f64);
+            let layout = layout::compute(&config_overlay, i, ctx.monitor.width, ctx.monitor.height);
             if let Ok(renderer) = Renderer::new(ctx.monitor.width, ctx.monitor.height, i, layout, &config_overlay) {
                 renderers.push(renderer);
             }
         }
         
-        // Setup Tick Thread
+        // Setup Tick Thread (30 FPS constant for smooth rain)
         let (tick_thread_tx, tick_thread_rx) = bounded(1);
-        let interval_rx_tick = interval_rx.clone();
-        let initial_interval = Duration::from_millis(config_overlay.general.update_ms);
         thread::spawn(move || {
-            let mut interval = initial_interval;
+            let interval = Duration::from_millis(33); // ~30 FPS
             loop {
                 let start = Instant::now();
                 if tick_thread_tx.send(()).is_err() { break; }
-                while let Ok(new_interval) = interval_rx_tick.try_recv() {
-                    interval = new_interval;
-                }
                 let elapsed = start.elapsed();
                 if elapsed < interval { thread::sleep(interval - elapsed); }
                 else { thread::sleep(Duration::from_millis(1)); }
@@ -225,6 +219,7 @@ fn main() -> Result<()> {
         let keycode_w = find_keycode(&conn_arc, 0x0077).unwrap_or(Some(0)).unwrap_or(0);
         let keycode_q = find_keycode(&conn_arc, 0x0071).unwrap_or(Some(0)).unwrap_or(0);
         let mut visible = true;
+        let mut last_draw = Instant::now();
 
         loop {
             if shutdown_arc.load(Ordering::Relaxed) { break; }
@@ -251,7 +246,8 @@ fn main() -> Result<()> {
                                     if let Some(idx) = wm.monitors.iter().position(|m| m.window == ev.window()) {
                                         if let Some(renderer) = renderers.get_mut(idx) {
                                             if let Ok(shared) = metrics_arc.lock() {
-                                                let _ = renderer.draw(&conn_arc, ev.window(), &config_overlay, &shared.data);
+                                                let dt = last_draw.elapsed();
+                                                let _ = renderer.draw(&conn_arc, ev.window(), &config_overlay, &shared.data, dt);
                                             }
                                         }
                                     }
@@ -263,10 +259,12 @@ fn main() -> Result<()> {
                 },
                 recv(tick_thread_rx) -> _ => {
                     if visible {
+                        let dt = last_draw.elapsed();
+                        last_draw = Instant::now();
                         if let Ok(shared) = metrics_arc.lock() {
                             for (i, renderer) in renderers.iter_mut().enumerate() {
                                 if let Some(ctx) = wm.monitors.get(i) {
-                                    let _ = renderer.draw(&conn_arc, ctx.window, &config_overlay, &shared.data);
+                                    let _ = renderer.draw(&conn_arc, ctx.window, &config_overlay, &shared.data, dt);
                                 }
                             }
                         }
@@ -298,6 +296,7 @@ fn main() -> Result<()> {
                             GuiEvent::Reload => {
                                 let _ = Command::new("notify-send").args(&["-t", "1000", "Matrix Overlay", "Changes Applied Successfully"]).spawn();
                                 if let Ok(new_config) = Config::load() {
+                                    log::info!("Configuration reloaded from disk.");
                                     config_overlay = new_config.clone();
                                     let _ = interval_tx_overlay.send(Duration::from_millis(config_overlay.general.update_ms));
                                     for renderer in &mut renderers { renderer.update_config(config_overlay.clone()); }

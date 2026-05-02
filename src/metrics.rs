@@ -1,6 +1,7 @@
 //! System metrics collection.
 //! Uses sysinfo and nvml-wrapper to gather CPU, RAM, and GPU statistics.
 
+use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::time::{Duration, Instant};
@@ -63,6 +64,8 @@ pub enum MetricId {
     DayOfWeek,
     /// Git code delta (added/deleted lines in 24h).
     CodeDelta,
+    /// CPU usage of the overlay process only.
+    OverlayCpu,
     /// Generic custom metric.
     Custom(String),
 }
@@ -86,6 +89,7 @@ impl MetricId {
             "weather_condition" => Some(Self::WeatherCondition),
             "day_of_week" => Some(Self::DayOfWeek),
             "code_delta" => Some(Self::CodeDelta),
+            "overlay_cpu" => Some(Self::OverlayCpu),
             other => Some(Self::Custom(other.to_string())),
         }
     }
@@ -108,6 +112,7 @@ impl MetricId {
             Self::WeatherCondition => "weather_condition",
             Self::DayOfWeek => "day_of_week",
             Self::CodeDelta => "code_delta",
+            Self::OverlayCpu => "overlay_cpu",
             Self::Custom(s) => s.as_str(),
         }
     }
@@ -130,6 +135,7 @@ impl MetricId {
             Self::WeatherCondition => "Weather",
             Self::DayOfWeek => "Day",
             Self::CodeDelta => "Delta",
+            Self::OverlayCpu => "Overlay CPU",
             Self::Custom(s) => s.as_str(),
         }.to_string()
     }
@@ -313,16 +319,31 @@ pub struct OpenMeteoCollector {
     lat: f64,
     lon: f64,
     enabled: bool,
+    auto_location: bool,
     url_base: String,
+    temp_unit: String,
 }
 
 impl OpenMeteoCollector {
-    pub fn new(lat: f64, lon: f64, enabled: bool) -> Self {
+    pub fn new(lat: f64, lon: f64, enabled: bool, auto_location: bool) -> Self {
         Self {
             lat,
             lon,
             enabled,
+            auto_location,
             url_base: "https://api.open-meteo.com".to_string(),
+            temp_unit: "celsius".to_string(),
+        }
+    }
+
+    pub fn new_with_unit(lat: f64, lon: f64, enabled: bool, auto_location: bool, temp_unit: String) -> Self {
+        Self {
+            lat,
+            lon,
+            enabled,
+            auto_location,
+            url_base: "https://api.open-meteo.com".to_string(),
+            temp_unit,
         }
     }
 
@@ -331,7 +352,9 @@ impl OpenMeteoCollector {
             lat,
             lon,
             enabled: true,
+            auto_location: false,
             url_base: url,
+            temp_unit: "celsius".to_string(),
         }
     }
 
@@ -355,6 +378,24 @@ impl OpenMeteoCollector {
     }
 }
 
+pub fn fetch_geoip_location() -> Result<(f64, f64)> {
+    log::info!("Fetching Geo-IP coordinates...");
+    let resp = reqwest::blocking::Client::new()
+        .get("http://ip-api.com/json")
+        .timeout(Duration::from_secs(3))
+        .send()?;
+
+    #[derive(Deserialize)]
+    struct IpApiResponse {
+        lat: f64,
+        lon: f64,
+    }
+
+    let geo = resp.json::<IpApiResponse>()?;
+    log::info!("Geo-IP Detected Location: ({}, {})", geo.lat, geo.lon);
+    Ok((geo.lat, geo.lon))
+}
+
 impl MetricCollector for OpenMeteoCollector {
     fn id(&self) -> &'static str { "open_meteo" }
     fn label(&self) -> &'static str { "Weather" }
@@ -364,16 +405,11 @@ impl MetricCollector for OpenMeteoCollector {
             return map;
         }
 
-        // Privacy Auto-Adjust: If lat/lon are 0.0, attempt one-time Geo-IP lookup
-        if self.lat == 0.0 && self.lon == 0.0 {
-             if let Ok(resp) = reqwest::blocking::get("http://ip-api.com/json") {
-                 #[derive(Deserialize)]
-                 struct IpApiResponse { lat: f64, lon: f64 }
-                 if let Ok(geo) = resp.json::<IpApiResponse>() {
-                     log::info!("Geo-IP Privacy Auto-Adjust: Detected Location ({}, {})", geo.lat, geo.lon);
-                     self.lat = geo.lat;
-                     self.lon = geo.lon;
-                 }
+        // Privacy Auto-Adjust: If auto_location is enabled and (lat/lon are 0.0), attempt Geo-IP lookup
+        if self.auto_location && (self.lat == 0.0 || self.lon == 0.0) {
+             if let Ok((lat, lon)) = fetch_geoip_location() {
+                 self.lat = lat;
+                 self.lon = lon;
              }
         }
 
@@ -382,7 +418,13 @@ impl MetricCollector for OpenMeteoCollector {
         match reqwest::blocking::Client::new().get(&url).timeout(std::time::Duration::from_secs(5)).send() {
             Ok(resp) => {
                 if let Ok(json) = resp.json::<OpenMeteoResponse>() {
-                    map.insert(MetricId::WeatherTemp, MetricValue::String(format!("{:.1}°C", json.current.temperature_2m)));
+                    let mut temp = json.current.temperature_2m;
+                    let mut suffix = "°C";
+                    if self.temp_unit == "fahrenheit" {
+                        temp = (temp * 9.0 / 5.0) + 32.0;
+                        suffix = "°F";
+                    }
+                    map.insert(MetricId::WeatherTemp, MetricValue::String(format!("{:.1}{}", temp, suffix)));
                     map.insert(MetricId::WeatherCondition, MetricValue::String(Self::weather_code_str(json.current.weather_code)));
                 }
             },
@@ -477,6 +519,49 @@ impl MetricCollector for NetworkCollector {
         self.last_collection_time = now;
 
         results
+    }
+}
+
+/// Collector for the overlay's own CPU usage.
+#[derive(Debug)]
+pub struct OverlayCpuCollector {
+    sys: Arc<Mutex<SysinfoManager>>,
+    pid: sysinfo::Pid,
+}
+
+impl OverlayCpuCollector {
+    pub fn new(sys: Arc<Mutex<SysinfoManager>>) -> Self {
+        use sysinfo::{get_current_pid};
+        let pid = get_current_pid().unwrap_or(sysinfo::Pid::from(0));
+        Self { sys, pid }
+    }
+}
+
+impl MetricCollector for OverlayCpuCollector {
+    fn id(&self) -> &'static str { "overlay_cpu" }
+    fn label(&self) -> &'static str { "Overlay CPU" }
+    fn collect(&mut self) -> HashMap<MetricId, MetricValue> {
+        let mut map = HashMap::new();
+        match self.sys.lock() {
+            Ok(mut manager) => {
+                use sysinfo::{ProcessExt};
+                manager.system.refresh_process(self.pid);
+                if let Some(process) = manager.system.process(self.pid) {
+                    let cpu = process.cpu_usage();
+                    // In sysinfo 0.29+, cpu_usage is 0-100% per core.
+                    // We normalize to system-wide % by dividing by core count.
+                    let core_count = manager.system.cpus().len() as f32;
+                    let normalized_cpu = if core_count > 0.0 { cpu / core_count } else { cpu };
+                    
+                    map.insert(MetricId::OverlayCpu, MetricValue::String(format!("{:.2}%", normalized_cpu)));
+                }
+            },
+            Err(e) => {
+                log::error!("OverlayCpuCollector lock failed: {}", e);
+                map.insert(MetricId::OverlayCpu, MetricValue::String("ERR".to_string()));
+            }
+        }
+        map
     }
 }
 
@@ -605,17 +690,19 @@ impl MetricCollector for DiskCollector {
 #[derive(Debug)]
 pub struct HwmonCollector {
     base_path: PathBuf,
+    temp_unit: String,
 }
 
 impl HwmonCollector {
-    pub fn new() -> Self {
+    pub fn new(temp_unit: String) -> Self {
         Self {
             base_path: PathBuf::from("/sys/class/hwmon"),
+            temp_unit,
         }
     }
 
     pub fn new_with_path(_metric_id: MetricId, path: PathBuf) -> Self {
-        Self { base_path: path }
+        Self { base_path: path, temp_unit: "celsius".to_string() }
     }
 
     fn read_file_as_i64<P: AsRef<Path>>(&self, path: P) -> Option<i64> {
@@ -656,27 +743,37 @@ impl MetricCollector for HwmonCollector {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(name) = self.read_name(&path) {
+                    // Prioritize dedicated fan controllers if multiple exist
                     match name.as_str() {
                         "k10temp" => {
-                            if let Some(temp) = self.read_file_as_i64(path.join("temp1_input")) {
-                                map.insert(MetricId::CpuTemp, MetricValue::String(format!("{:.0}°C", temp as f64 / 1000.0)));
+                            if let Some(temp_raw) = self.read_file_as_i64(path.join("temp1_input")) {
+                                let mut temp = temp_raw as f64 / 1000.0;
+                                let mut suffix = "°C";
+                                if self.temp_unit == "fahrenheit" {
+                                    temp = (temp * 9.0 / 5.0) + 32.0;
+                                    suffix = "°F";
+                                }
+                                map.insert(MetricId::CpuTemp, MetricValue::String(format!("{:.0}{}", temp, suffix)));
                                 found_cpu = true;
                             }
                         },
-                        "amdgpu" => {
-                            if let Some(_temp) = self.read_file_as_i64(path.join("temp1_input")) {
-                                // We map iGPU temp to GpuTemp if no dGPU, or just ignore for now as MetricId is limited
+                        "amdgpu" | "dell_smm" | "alienware_wmi" | "it87" | "nct6775" => {
+                            // Scan all possible fan inputs (usually up to 5 on consumer boards)
+                            for i in 1..=5 {
+                                let fan_file = path.join(format!("fan{}_input", i));
+                                if let Some(rpm) = self.read_file_as_i64(&fan_file) {
+                                    if rpm > 0 {
+                                        // We pick the first non-zero fan we find
+                                        if !found_fan {
+                                            map.insert(MetricId::FanSpeed, MetricValue::String(format!("{} RPM", rpm)));
+                                            found_fan = true;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if name == "amdgpu" {
                                 found_igpu = true;
-                            }
-                            if let Some(rpm) = self.read_file_as_i64(path.join("fan1_input")) {
-                                map.insert(MetricId::FanSpeed, MetricValue::String(format!("{} RPM", rpm)));
-                                found_fan = true;
-                            }
-                        },
-                        "dell_smm" => {
-                            if let Some(rpm) = self.read_file_as_i64(path.join("fan1_input")) {
-                                map.insert(MetricId::FanSpeed, MetricValue::String(format!("{} RPM", rpm)));
-                                found_fan = true;
                             }
                         },
                         _ => {}
@@ -1025,16 +1122,19 @@ fn init_collectors(config: &Config, sys_manager: Arc<Mutex<SysinfoManager>>) -> 
         collectors.push(Box::new(DiskCollector::new(sys_manager.clone())));
     }
     if required_metrics.contains(&MetricId::CpuTemp) || required_metrics.contains(&MetricId::FanSpeed) {
-        collectors.push(Box::new(HwmonCollector::new()));
+        collectors.push(Box::new(HwmonCollector::new(config.general.temp_unit.clone())));
     }
     if required_metrics.contains(&MetricId::GpuTemp) || required_metrics.contains(&MetricId::GpuUtil) {
-        collectors.push(Box::new(NvidiaSmiCollector::new()));
+        collectors.push(Box::new(NvidiaSmiCollector::new(config.general.temp_unit.clone())));
     }
     if !config.productivity.repos.is_empty() {
         collectors.push(Box::new(GitCollector::new(config.productivity.repos.clone())));
     }
     if config.weather.enabled {
-        collectors.push(Box::new(OpenMeteoCollector::new(config.weather.lat, config.weather.lon, true)));
+        collectors.push(Box::new(OpenMeteoCollector::new_with_unit(config.weather.lat, config.weather.lon, true, config.weather.auto_location, config.general.temp_unit.clone())));
+    }
+    if config.general.show_cpu_metric || required_metrics.contains(&MetricId::OverlayCpu) {
+        collectors.push(Box::new(OverlayCpuCollector::new(sys_manager.clone())));
     }
     
     collectors.push(Box::new(DateCollector));
@@ -1089,21 +1189,23 @@ impl MetricCollector for SysinfoCollector {
 pub struct NvidiaSmiCollector {
     command: String,
     args: Vec<String>,
+    temp_unit: String,
 }
 
 impl NvidiaSmiCollector {
-    pub fn new() -> Self {
+    pub fn new(temp_unit: String) -> Self {
         Self {
             command: "nvidia-smi".to_string(),
             args: vec![
                 "--query-gpu=temperature.gpu,utilization.gpu,fan.speed".to_string(),
                 "--format=csv,noheader,nounits".to_string(),
             ],
+            temp_unit,
         }
     }
 
     pub fn new_with_command(_metric_id: MetricId, command: String, args: Vec<String>) -> Self {
-        Self { command, args }
+        Self { command, args, temp_unit: "celsius".to_string() }
     }
 }
 
@@ -1120,8 +1222,13 @@ impl MetricCollector for NvidiaSmiCollector {
                     let parts: Vec<&str> = stdout.trim().split(',').map(|s| s.trim()).collect();
                     
                     if parts.len() >= 3 {
-                        if let Ok(temp) = parts[0].parse::<f64>() {
-                            map.insert(MetricId::GpuTemp, MetricValue::String(format!("{:.0}°C", temp)));
+                        if let Ok(mut temp) = parts[0].parse::<f64>() {
+                            let mut suffix = "°C";
+                            if self.temp_unit == "fahrenheit" {
+                                temp = (temp * 9.0 / 5.0) + 32.0;
+                                suffix = "°F";
+                            }
+                            map.insert(MetricId::GpuTemp, MetricValue::String(format!("{:.0}{}", temp, suffix)));
                         }
                         if let Ok(util) = parts[1].parse::<f64>() {
                             map.insert(MetricId::GpuUtil, MetricValue::String(format!("{:.0}%", util)));
