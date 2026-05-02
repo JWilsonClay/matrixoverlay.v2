@@ -1,4 +1,10 @@
 /target
 **/*.rs.bk
+**/*.bak
 config.json
 gemini_clock.md
+*.log
+compile_log.txt
+/backups/
+/logs/
+matrixoverlay.v2.codebase.md
