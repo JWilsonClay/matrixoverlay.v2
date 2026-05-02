@@ -82,10 +82,14 @@ impl OpenMeteoCollector {
 
 pub fn fetch_geoip_location() -> Result<(f64, f64)> {
     log::info!("Fetching Geo-IP coordinates...");
-    let resp = reqwest::blocking::Client::new()
-        .get("http://ip-api.com/json")
+    
+    // **[HARDENING: Network Resilience]**
+    let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(3))
-        .send()?;
+        .user_agent("MatrixOverlay/2.0 (Security Hardened)")
+        .build()?;
+
+    let mut resp = client.get("http://ip-api.com/json").send()?;
 
     #[derive(Deserialize)]
     struct IpApiResponse {
@@ -93,7 +97,12 @@ pub fn fetch_geoip_location() -> Result<(f64, f64)> {
         lon: f64,
     }
 
-    let geo = resp.json::<IpApiResponse>()?;
+    // **[HARDENING: Response Size Limit]**
+    use std::io::Read;
+    let mut buffer = Vec::new();
+    resp.by_ref().take(1024 * 5).read_to_end(&mut buffer)?;
+
+    let geo = serde_json::from_slice::<IpApiResponse>(&buffer)?;
     log::info!("Geo-IP Detected Location: ({}, {})", geo.lat, geo.lon);
     Ok((geo.lat, geo.lon))
 }
@@ -107,6 +116,17 @@ impl MetricCollector for OpenMeteoCollector {
             return map;
         }
 
+        // **[HARDENING: Resource Resilience]**
+        // Using a centralized client with strict timeouts and user-agent to avoid hangs or blocks.
+        let client = match reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .user_agent("MatrixOverlay/2.0 (Security Hardened)")
+            .build() 
+        {
+            Ok(c) => c,
+            Err(_) => return map,
+        };
+
         if self.auto_location && (self.lat == 0.0 || self.lon == 0.0) {
              if let Ok((lat, lon)) = fetch_geoip_location() {
                  self.lat = lat;
@@ -116,17 +136,23 @@ impl MetricCollector for OpenMeteoCollector {
 
         let url = format!("{}/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code", self.url_base, self.lat, self.lon);
 
-        match reqwest::blocking::Client::new().get(&url).timeout(std::time::Duration::from_secs(5)).send() {
-            Ok(resp) => {
-                if let Ok(json) = resp.json::<OpenMeteoResponse>() {
-                    let mut temp = json.current.temperature_2m;
-                    let mut suffix = "°C";
-                    if self.temp_unit == "fahrenheit" {
-                        temp = (temp * 9.0 / 5.0) + 32.0;
-                        suffix = "°F";
+        // **[HARDENING: Response Size Limit]**
+        // Limiting response reading to 10KB to prevent memory exhaustion DoS.
+        match client.get(&url).send() {
+            Ok(mut resp) => {
+                use std::io::Read;
+                let mut buffer = Vec::new();
+                if let Ok(_) = resp.by_ref().take(1024 * 10).read_to_end(&mut buffer) {
+                    if let Ok(json) = serde_json::from_slice::<OpenMeteoResponse>(&buffer) {
+                        let mut temp = json.current.temperature_2m;
+                        let mut suffix = "°C";
+                        if self.temp_unit == "fahrenheit" {
+                            temp = (temp * 9.0 / 5.0) + 32.0;
+                            suffix = "°F";
+                        }
+                        map.insert(MetricId::WeatherTemp, MetricValue::String(format!("{:.1}{}", temp, suffix)));
+                        map.insert(MetricId::WeatherCondition, MetricValue::String(Self::weather_code_str(json.current.weather_code)));
                     }
-                    map.insert(MetricId::WeatherTemp, MetricValue::String(format!("{:.1}{}", temp, suffix)));
-                    map.insert(MetricId::WeatherCondition, MetricValue::String(Self::weather_code_str(json.current.weather_code)));
                 }
             },
             Err(e) => {

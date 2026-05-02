@@ -34,8 +34,12 @@ pub fn is_safe_path(path: &Path) -> bool {
             return false;
         }
 
-        // Check for sensitive sub-directories
-        let sensitive_patterns = [".ssh", ".gnupg", ".aws", ".config/gh", "secrets"];
+        // **[HARDENING: Expanded Blocklist]**
+        // Added critical shell history and credential store patterns.
+        let sensitive_patterns = [
+            ".ssh", ".gnupg", ".aws", ".config/gh", "secrets", 
+            ".bash_history", ".zsh_history", ".pki", ".local/share/keyrings"
+        ];
         for pattern in &sensitive_patterns {
             if canonical.to_string_lossy().contains(pattern) {
                 return false;
@@ -45,8 +49,9 @@ pub fn is_safe_path(path: &Path) -> bool {
         true
     } else {
         // If file doesn't exist, we permit it for now if it's within home
-        // (e.g. for checking existence later)
-        full_path.starts_with(&home)
+        // and doesn't contain parent directory traversal.
+        // **[HARDENING: Parent Traversal Double-Check]**
+        !full_path.to_string_lossy().contains("..") && full_path.starts_with(&home)
     }
 }
 

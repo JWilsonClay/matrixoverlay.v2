@@ -265,31 +265,66 @@ impl Config {
     /// Validates the loaded configuration before returning.
     pub fn load() -> Result<Self> {
         let home = env::var("HOME").context("HOME environment variable not set")?;
-        let config_path = Path::new(&home).join(".config/matrix-overlay/config.json");
+        let config_dir = Path::new(&home).join(".config/matrix-overlay");
+        let config_path = config_dir.join("config.json");
 
         if !config_path.exists() {
-            if let Some(parent) = config_path.parent() {
-                fs::create_dir_all(parent).context("Failed to create config directory")?;
+            if !config_dir.exists() {
+                fs::create_dir_all(&config_dir).context("Failed to create config directory")?;
+                // **[HARDENING: Directory Permissions]**
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700));
+                }
             }
             let default_config = Config::default();
             let json = serde_json::to_string_pretty(&default_config).context("Failed to serialize default config")?;
             fs::write(&config_path, json).context("Failed to write default config file")?;
+            
+            // **[HARDENING: File Permissions]**
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600));
+            }
             return Ok(default_config);
         }
 
-        let content = fs::read_to_string(&config_path).context("Failed to read config file")?;
-        let config: Config = serde_json::from_str(&content).context("Failed to parse config.json")?;
+        // **[HARDENING: Memory Exhaustion DoS Protection]**
+        // Limit config reading to 1MB.
+        use std::io::Read;
+        let mut file = fs::File::open(&config_path).context("Failed to open config file")?;
+        let mut content = Vec::new();
+        file.by_ref().take(1024 * 1024).read_to_end(&mut content)?;
+        
+        let config: Config = serde_json::from_slice(&content).context("Failed to parse config.json")?;
 
         config.validate()?;
         Ok(config)
     }
 
     /// Saves configuration to `~/.config/matrix-overlay/config.json`.
+    /// **[HARDENING: Atomic Write]**
+    /// Uses a temporary file and rename to ensure the config is never left in a partial state.
     pub fn save(&self) -> Result<()> {
         let home = env::var("HOME").context("HOME environment variable not set")?;
-        let config_path = Path::new(&home).join(".config/matrix-overlay/config.json");
+        let config_dir = Path::new(&home).join(".config/matrix-overlay");
+        let config_path = config_dir.join("config.json");
+        let temp_path = config_dir.join("config.json.tmp");
+
         let json = serde_json::to_string_pretty(self).context("Failed to serialize config")?;
-        fs::write(config_path, json).context("Failed to write config file")?;
+        
+        // **[HARDENING: Permissions]**
+        // Ensure the config file is only readable by the owner.
+        fs::write(&temp_path, json).context("Failed to write temporary config file")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600));
+        }
+
+        fs::rename(temp_path, config_path).context("Failed to atomize config save via rename")?;
         Ok(())
     }
 

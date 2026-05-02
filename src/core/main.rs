@@ -68,7 +68,9 @@ pub fn run() -> Result<()> {
 
     // 6. Set Background
     log::info!("Setting background to black...");
-    if let Err(e) = Command::new("xsetroot").args(&["-solid", "#000000"]).spawn() {
+    // **[HARDENING: Secure Execution]**
+    // Using safe_exec to avoid shell interpretation.
+    if let Err(e) = safe_exec("xsetroot", &["-solid", "#000000"]) {
         log::warn!("Failed to execute xsetroot: {}", e);
     }
 
@@ -317,6 +319,17 @@ fn setup_autostart() -> Result<()> {
     if !autostart_dir.exists() { fs::create_dir_all(&autostart_dir)?; }
     
     let desktop_file = autostart_dir.join("matrix-overlay.desktop");
+
+    // **[HARDENING: Symlink Validation]**
+    // Ensure we don't follow a malicious symlink to a sensitive system file.
+    if desktop_file.exists() {
+        let metadata = fs::symlink_metadata(&desktop_file)?;
+        if metadata.file_type().is_symlink() {
+            log::warn!("Security Alert: Autostart file is a symlink. Removing for safety.");
+            let _ = fs::remove_file(&desktop_file);
+        }
+    }
+
     if !desktop_file.exists() {
         let current_exe = env::current_exe()?;
         let content = format!(
@@ -324,6 +337,31 @@ fn setup_autostart() -> Result<()> {
             current_exe.to_string_lossy()
         );
         fs::write(&desktop_file, content)?;
+
+        // **[HARDENING: Permissions]**
+        // Ensure the desktop file is only writable by the user (0644).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&desktop_file, fs::Permissions::from_mode(0o644));
+        }
+    }
+    Ok(())
+}
+
+/// **[HARDENING: Secure Execution]**
+/// Executes a command without shell interpretation, ensuring arguments cannot be escaped.
+fn safe_exec(cmd: &str, args: &[&str]) -> Result<()> {
+    let status = std::process::Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .context(format!("Failed to execute {}", cmd))?;
+    
+    if !status.success() {
+        log::warn!("Command {} failed with status {}", cmd, status);
     }
     Ok(())
 }

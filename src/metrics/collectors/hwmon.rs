@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
+use std::thread;
 use crate::metrics::{MetricId, MetricValue, MetricCollector};
 
 /// Collector for Hardware Monitor sensors (Temperature, Fans).
@@ -51,14 +53,18 @@ impl HwmonCollector {
 impl MetricCollector for HwmonCollector {
     fn id(&self) -> &'static str { "hwmon" }
     fn label(&self) -> &'static str { "Sensors" }
+
     fn collect(&mut self) -> HashMap<MetricId, MetricValue> {
         let mut map = HashMap::new();
         let mut found_cpu = false;
         let mut found_igpu = false;
         let mut found_fan = false;
 
+        // **[HARDENING: Resource Limit]**
+        // Limit directory iteration to avoid potential hangs in sysfs.
         if let Ok(entries) = fs::read_dir(&self.base_path) {
-            for entry in entries.flatten() {
+            for (count, entry) in entries.flatten().enumerate() {
+                if count > 32 { break; } // Sanity cap for hwmon instances
                 let path = entry.path();
                 if let Some(name) = self.read_name(&path) {
                     match name.as_str() {
@@ -98,8 +104,36 @@ impl MetricCollector for HwmonCollector {
         }
 
         if !found_cpu || !found_igpu || !found_fan {
-             if let Ok(output) = Command::new("sensors").output() {
-                 let output_str = String::from_utf8_lossy(&output.stdout);
+             // **[HARDENING: Command Timeout]**
+             // Using a 2-second timeout for the sensors command to avoid blocking the metrics thread.
+             let child = Command::new("sensors")
+                 .stdin(std::process::Stdio::null())
+                 .stdout(std::process::Stdio::piped())
+                 .stderr(std::process::Stdio::null())
+                 .spawn();
+
+             if let Ok(mut child) = child {
+                 let timeout = Duration::from_secs(2);
+                 let start = std::time::Instant::now();
+                 let mut output = Vec::new();
+                 
+                 loop {
+                     if let Ok(Some(_status)) = child.try_wait() {
+                         if let Some(mut stdout) = child.stdout.take() {
+                             use std::io::Read;
+                             let _ = stdout.read_to_end(&mut output);
+                         }
+                         break;
+                     }
+                     if start.elapsed() >= timeout {
+                         let _ = child.kill();
+                         log::warn!("sensors command timed out");
+                         break;
+                     }
+                     thread::sleep(Duration::from_millis(10));
+                 }
+
+                 let output_str = String::from_utf8_lossy(&output);
                  let mut current_adapter = "";
                  for line in output_str.lines() {
                      if line.trim().is_empty() { continue; }
@@ -112,9 +146,6 @@ impl MetricCollector for HwmonCollector {
                          if let Some(val) = Self::extract_sensor_value(line) {
                              map.insert(MetricId::CpuTemp, MetricValue::String(val));
                          }
-                     }
-                     if current_adapter.starts_with("amdgpu") && line.contains("edge:") && !found_igpu {
-                         // Logic for iGPU if needed
                      }
                      if (current_adapter.starts_with("amdgpu") || current_adapter.starts_with("dell_smm")) && line.contains("fan1:") && !found_fan {
                          if let Some(val) = Self::extract_sensor_value(line) {

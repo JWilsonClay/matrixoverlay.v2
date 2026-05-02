@@ -1,5 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Result, Context};
 use std::path::Path;
+use std::fs;
 use git2::Repository;
 use crate::core::config::Config;
 use crate::core::path_utils;
@@ -13,6 +14,15 @@ pub fn run_auto_commit_cycle(config: &Config) -> Result<()> {
         if !path_utils::is_safe_path(path) {
             log::warn!("Skipping unsafe repo path: {}", repo_path);
             continue;
+        }
+
+        // **[HARDENING: Symlink Redirection Protection]**
+        // Ensure the repository path itself is not a malicious symlink.
+        if let Ok(meta) = fs::symlink_metadata(path) {
+             if meta.file_type().is_symlink() {
+                 log::warn!("Security Alert: Repository path {} is a symlink. Skipping.", repo_path);
+                 continue;
+             }
         }
 
         match Repository::open(path) {
@@ -91,7 +101,12 @@ fn generate_ai_commit_message(repo: &Repository) -> Result<String> {
         truncated_diff
     );
 
-    let client = reqwest::blocking::Client::new();
+    // **[HARDENING: Network Resilience]**
+    // Using a dedicated client with a strict timeout to prevent hangs.
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
     let body = serde_json::json!({
         "model": "qwen2.5-coder:7b-instruct-q5_K_M",
         "prompt": prompt,
@@ -100,7 +115,8 @@ fn generate_ai_commit_message(repo: &Repository) -> Result<String> {
 
     let res = client.post("http://localhost:11434/api/generate")
         .json(&body)
-        .send()?
+        .send()
+        .context("Ollama service unreachable or timed out")?
         .json::<serde_json::Value>()?;
 
     if let Some(msg) = res["response"].as_str() {

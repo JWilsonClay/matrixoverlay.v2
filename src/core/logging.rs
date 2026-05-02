@@ -52,10 +52,22 @@ impl Logger {
     /// Purges all debug log files in the specified directory.
     pub fn purge_debug_logs(log_dir: &str) -> std::io::Result<()> {
         let path = std::path::Path::new(log_dir);
+        // **[HARDENING: Path Validation]**
+        if !crate::core::path_utils::is_safe_path(path) {
+            log::warn!("Security Alert: Attempted to purge unsafe log directory: {}", log_dir);
+            return Ok(());
+        }
+
         if path.exists() && path.is_dir() {
             for entry in std::fs::read_dir(path)? {
                 let entry = entry?;
                 let path = entry.path();
+                // **[HARDENING: Symlink Protection]**
+                // Do not follow symlinks during purge.
+                if let Ok(meta) = fs::symlink_metadata(&path) {
+                    if meta.file_type().is_symlink() { continue; }
+                }
+
                 if path.is_file() {
                     // Only delete files ending in .log
                     if path.extension().map_or(false, |ext| ext == "log") {
@@ -70,6 +82,11 @@ impl Logger {
     fn write_to_file(&self, filename: &str, content: &str) {
         let path = self.log_dir.join(filename);
         
+        // **[HARDENING: Path Validation]**
+        if !crate::core::path_utils::is_safe_path(&path) {
+            return;
+        }
+
         // Rotation check
         if let Ok(metadata) = fs::metadata(&path) {
             if metadata.len() > self.max_file_size {
@@ -77,7 +94,14 @@ impl Logger {
             }
         }
 
+        // **[HARDENING: Permissions]**
+        // Ensure log files are only readable by the owner.
         if let Ok(file) = OpenOptions::new().create(true).append(true).open(&path) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+            }
             let mut writer = BufWriter::new(file);
             let timestamp = Local::now().format("%Y-%m-%dT%H:%M:%S");
             let _ = writeln!(writer, "[{}] {}", timestamp, content);
