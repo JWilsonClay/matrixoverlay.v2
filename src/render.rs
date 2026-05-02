@@ -1,6 +1,7 @@
 // src/render.rs
 use std::collections::HashMap;
 use std::time::Duration;
+use chrono::Local;
 use std::cell::RefCell;
 use anyhow::Result;
 use cairo::{Context as CairoContext, Format, ImageSurface, Operator};
@@ -134,7 +135,8 @@ impl RainManager {
                 let alpha = if config.cosmetics.rain_speed == 0.0 {
                     // Pulse-fade over 1.5s (simulated by frame count)
                     let fc = frame_count as f64;
-                    let pulse = ( (fc * 0.05).sin() * 0.5 ) + 0.5;
+                    // Ensure it stays above a minimum visibility
+                    let pulse = ( (fc * 0.05).sin() * 0.4 ) + 0.6;
                     alpha * pulse
                 } else {
                     alpha
@@ -196,6 +198,8 @@ pub struct Renderer {
     frame_count: RefCell<u64>,
     /// State of items for logging
     pub item_states: RefCell<Vec<crate::logging::ItemState>>,
+    /// State logger
+    pub logger: Option<crate::logging::Logger>,
 }
 
 impl Renderer {
@@ -233,6 +237,11 @@ impl Renderer {
             rain_manager: RainManager::new(config.cosmetics.realism_scale),
             frame_count: RefCell::new(0),
             item_states: RefCell::new(Vec::new()),
+            logger: if config.logging.enabled {
+                Some(crate::logging::Logger::new(&config.logging.log_path, config.logging.max_files, config.logging.max_file_size_mb))
+            } else {
+                None
+            },
         };
         
         // Initial clear
@@ -250,12 +259,11 @@ impl Renderer {
     }
 
     pub fn update_config(&mut self, config: Config) {
-        let screen = &config.screens[self.monitor_index];
         self.config_layout = crate::layout::compute(
-            screen, 
+            &config, 
+            self.monitor_index,
             self.surface.width() as u16, 
             self.surface.height() as u16, 
-            config.general.font_size as f64
         );
         self.rain_manager.realism_scale = config.cosmetics.realism_scale;
         
@@ -266,6 +274,15 @@ impl Renderer {
             "classic" => (0.0, 1.0, 65.0 / 255.0),
             _ => parse_hex_color(&config.general.color).unwrap_or((0.0, 1.0, 65.0 / 255.0)),
         };
+
+        // Live update logger state
+        if config.logging.enabled {
+            if self.logger.is_none() {
+                self.logger = Some(crate::logging::Logger::new(&config.logging.log_path, config.logging.max_files, config.logging.max_file_size_mb));
+            }
+        } else {
+            self.logger = None;
+        }
     }
 
     /// Main draw loop.
@@ -274,7 +291,8 @@ impl Renderer {
         conn: &xcb::Connection, 
         window: x::Window, 
         config: &Config, 
-        metrics: &MetricData
+        metrics: &MetricData,
+        dt: Duration
     ) -> Result<()> {
         // FPS Capping logic
         *self.frame_count.borrow_mut() += 1;
@@ -285,7 +303,7 @@ impl Renderer {
 
         // Update physics
         self.rain_manager.update(
-            Duration::from_millis(33), // Fixed 30 FPS delta (approx 33ms)
+            dt, 
             self.surface.width(),
             self.surface.height(),
             config
@@ -379,12 +397,6 @@ impl Renderer {
                 if let Some(value) = metrics.values.get(&id) {
                     let value_str = self.format_metric_value(value);
                     
-                    // 2. Draw Occlusion Box if enabled
-                    let box_h = config.general.metric_font_size as f64 * 1.5;
-                    if config.cosmetics.occlusion_enabled {
-                        self.draw_occlusion_box(&cr, item.x as f64 - 5.0, item.y as f64 - 2.0, item.max_width as f64 + 10.0, box_h, config)?;
-                    }
-
                     let label = if item.label.is_empty() { id.label() } else { item.label.clone() };
                     
                     // Enable scrolling for network or weather which might be long
@@ -402,7 +414,8 @@ impl Renderer {
                         &item.metric_id,
                         item.clip || allow_scroll,
                         &config.general.glow_passes,
-                        config
+                        config,
+                        item
                     )?;
 
                     if config.logging.enabled {
@@ -419,6 +432,16 @@ impl Renderer {
                     log::debug!("Skipping metric {:?} (No data available)", id);
                 }
             }
+        }
+
+        // Log the final state if logger is present
+        if let Some(ref logger) = self.logger {
+            let capture = crate::logging::StateCapture {
+                timestamp: Local::now().to_rfc3339(),
+                monitor: self.monitor_index,
+                items: self.item_states.borrow().clone(),
+            };
+            logger.log_state(&capture);
         }
 
         // Explicitly drop context to release surface lock
@@ -471,12 +494,12 @@ impl Renderer {
         
         layout.set_text(header_text);
         let (_, logical) = layout.pixel_extents();
-        let text_width = logical.width as f64; 
-        let text_height = logical.height as f64;
+        let text_width = logical.width() as f64; 
+        let text_height = logical.height() as f64;
         
         // Center horizontally and vertically within the box
-        let x = box_x + (box_w - text_width) / 2.0;
-        let y = box_y + (box_h - text_height) / 2.0;
+        let x = box_x + (box_w - text_width) / 2.0 - logical.x() as f64;
+        let y = box_y + (box_h - text_height) / 2.0 - logical.y() as f64;
         
         // Theme-aware colors
         let theme_color = match config.general.theme.as_str() {
@@ -503,7 +526,8 @@ impl Renderer {
         metric_id: &str,
         allow_scroll: bool,
         glow_passes: &[(f64, f64, f64)],
-        config: &Config
+        config: &Config,
+        item: &crate::layout::LayoutItem,
     ) -> Result<()> {
         let layout = pangocairo::functions::create_layout(cr);
         let mut desc = pango::FontDescription::from_string("Monospace");
@@ -512,67 +536,58 @@ impl Renderer {
 
         let box_h = config.general.metric_font_size as f64 * 1.5;
         
-        // 1. Draw Label
+        // 1. Measure Sizes
         layout.set_text(label);
-        let (_, label_h_px) = layout.pixel_size();
+        let (label_w_px, label_h_px) = layout.pixel_size();
+        let label_width = label_w_px as f64;
         let label_h = label_h_px as f64;
         
-        // Vertical centering: box_h vs label_h
-        let centered_y = y + (box_h - label_h) / 2.0 - 2.0;
-
-        self.draw_text_glow_at(cr, &layout, x, centered_y, None, glow_passes, config)?;
-        
-        let (label_w_px, _) = layout.pixel_size();
-        let label_width = label_w_px as f64;
-
-        // 2. Prepare Value
         layout.set_text(value);
         let (val_w_px, _) = layout.pixel_size();
         let value_width = val_w_px as f64;
 
-        // Calculate available space for value
-        let padding = 10.0;
-        let value_area_start = x + label_width + padding;
-        let value_area_width = max_width - label_width - padding;
+        // NEW Spacing Logic: 200 is the factor for "full width" (right-justified)
+        let spacing_factor = (item.label_value_spacing as f64).clamp(0.0, 200.0) / 200.0;
+        let min_value_x = x + label_width + 10.0; // 10px minimum gap
+        let max_value_x = x + max_width - value_width;
+        
+        // Ensure max doesn't fall behind min if label is very long
+        let target_max_x = f64::max(min_value_x, max_value_x);
+        let mut draw_x = min_value_x + (target_max_x - min_value_x) * spacing_factor;
 
-        if value_area_width <= 0.0 {
-            return Ok(()); // No space
+        let box_width = (draw_x + value_width) - x;
+
+        // 2. Draw Occlusion Box if enabled
+        if config.cosmetics.occlusion_enabled {
+            self.draw_occlusion_box(cr, x - 5.0, y - 2.0, box_width + 10.0, box_h, config)?;
         }
 
-        // 3. Calculate Position & Scroll
-        let mut draw_x = x + max_width - value_width;
+        // 3. Draw Label
+        layout.set_text(label);
+        let centered_y = y + (box_h - label_h) / 2.0 - 2.0;
+        self.draw_text_glow_at(cr, &layout, x, centered_y, None, glow_passes, config)?;
         
+        // 4. Calculate Scroll for Value if it exceeds max_width
+        layout.set_text(value);
+        let value_area_start = min_value_x - 5.0; 
+        let value_area_width = max_width - label_width - 5.0;
+
         // Clip rectangle for value
         cr.save()?;
-        cr.rectangle(value_area_start, y, value_area_width, self.height as f64); // Height is loose here, clip handles it
+        cr.rectangle(value_area_start, y, (draw_x + value_width) - value_area_start + 10.0, self.height as f64); 
         cr.clip();
 
         if value_width > value_area_width && allow_scroll {
-            // Scrolling logic
             let mut offsets = self.scroll_offsets.borrow_mut();
             let offset = offsets.entry(metric_id.to_string()).or_insert(0.0);
-            
-            // Slow scroll: 0.5px per frame
             *offset += 0.5;
-            
-            // Reset if scrolled past
             let scroll_span = value_width + value_area_width; 
             if *offset > scroll_span {
-                *offset = -value_area_width; // Start entering from right
+                *offset = -value_area_width;
             }
-
-            // Override draw_x for scrolling
             draw_x = (x + max_width) - *offset;
-            
-            // If we have scrolled so far that the text is gone, reset
             if draw_x + value_width < value_area_start {
-                 *offset = 0.0; // Reset to start
-            }
-        } else {
-            // Ensure right alignment if fitting, or clamped if not scrolling
-            if value_width > value_area_width {
-                // If too big and no scroll, align left of value area (show start of string)
-                draw_x = value_area_start;
+                 *offset = 0.0;
             }
         }
 
@@ -580,7 +595,6 @@ impl Renderer {
         self.draw_text_glow_at(cr, &layout, draw_x, centered_y, None, glow_passes, config)?;
 
         cr.restore()?; // Restore clip
-
         Ok(())
     }
 

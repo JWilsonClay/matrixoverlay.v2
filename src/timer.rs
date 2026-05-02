@@ -13,7 +13,7 @@ use crate::metrics::{
     SharedMetrics, MetricData, MetricId, MetricCollector,
     SysinfoManager, CpuCollector, MemoryCollector, UptimeLoadCollector,
     NetworkCollector, DiskCollector, HwmonCollector, NvidiaSmiCollector,
-    OpenMeteoCollector, DateCollector
+    OpenMeteoCollector, DateCollector, OverlayCpuCollector
 };
 
 /// Spawns a thread that collects metrics and signals a redraw event at a fixed interval.
@@ -71,13 +71,16 @@ pub fn spawn_metrics_and_timer_thread(
             collectors.push(Box::new(DiskCollector::new(sys_manager.clone())));
         }
         if required_metrics.contains(&MetricId::CpuTemp) || required_metrics.contains(&MetricId::FanSpeed) || required_metrics.contains(&MetricId::GpuTemp) {
-            collectors.push(Box::new(HwmonCollector::new()));
+            collectors.push(Box::new(HwmonCollector::new(config.general.temp_unit.clone())));
         }
         if required_metrics.contains(&MetricId::GpuTemp) || required_metrics.contains(&MetricId::GpuUtil) {
-             collectors.push(Box::new(NvidiaSmiCollector::new()));
+             collectors.push(Box::new(NvidiaSmiCollector::new(config.general.temp_unit.clone())));
         }
         if config.weather.enabled {
-            collectors.push(Box::new(OpenMeteoCollector::new(config.weather.lat, config.weather.lon, true)));
+            collectors.push(Box::new(OpenMeteoCollector::new_with_unit(config.weather.lat, config.weather.lon, true, config.weather.auto_location, config.general.temp_unit.clone())));
+        }
+        if config.general.show_cpu_metric || required_metrics.contains(&MetricId::OverlayCpu) {
+            collectors.push(Box::new(OverlayCpuCollector::new(sys_manager.clone())));
         }
         collectors.push(Box::new(DateCollector));
 

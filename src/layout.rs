@@ -1,7 +1,7 @@
 //! Layout calculation and validation.
 //! Handles adaptive positioning, safe zones, and config validation.
 
-use crate::config::{Config, Screen};
+use crate::config::Config;
 use anyhow::Result;
 use std::collections::HashSet;
 
@@ -16,6 +16,7 @@ pub struct LayoutItem {
     pub label: String,
     pub x: i32,
     pub y: i32,
+    pub label_value_spacing: i32,
     pub max_width: i32,
     pub alignment: String,
     pub clip: bool,
@@ -58,36 +59,69 @@ pub fn validate_config(config: &Config) -> Result<()> {
 }
 
 /// Computes the layout for a specific monitor based on its dimensions and config.
-pub fn compute(screen: &Screen, width: u16, _height: u16, global_font_size: f64) -> Layout {
+pub fn compute(config: &Config, screen_index: usize, width: u16, _height: u16) -> Layout {
+    let screen = match config.screens.get(screen_index) {
+        Some(s) => s,
+        None => &config.screens[0],
+    };
+    
     let mut items = Vec::new();
     
     // Use screen offsets from config
-    let left = screen.x_offset;
-    let top = screen.y_offset;
+    let left_margin = screen.x_offset;
+    let top_margin = screen.y_offset;
     
     // Icon Avoidance: Fixed top safe zone of 180px for desktop icons and header
     let safe_top = 180;
-    let start_y = std::cmp::max(top, safe_top);
+    let start_y = std::cmp::max(top_margin, safe_top);
     
-    let mut cursor_y = start_y;
-    // Approximate line height: font size + padding
-    let line_height = (global_font_size * 1.5) as i32; 
+    let line_height = config.general.metric_spacing;
+    let columns = std::cmp::max(1, config.general.metric_columns);
+    
+    // Filter out weather_condition as it's typically paired with weather_temp
+    let metrics: Vec<_> = screen.metrics.iter()
+        .filter(|m| *m != "weather_condition")
+        .collect();
+    
+    if metrics.is_empty() {
+        return Layout { items };
+    }
 
-    for metric_id in &screen.metrics {
-        // Simple vertical list layout
-        let x = left;
-        let y = cursor_y;
-        cursor_y += line_height;
+    // Calculate metrics per column
+    let metrics_per_column = (metrics.len() as f64 / columns as f64).ceil() as usize;
+    
+    // Calculate column width
+    let total_available_width = width as i32 - left_margin * 2;
+    let col_width = if columns > 1 {
+        total_available_width / columns as i32
+    } else {
+        std::cmp::min(400, total_available_width) // Classic width for single column
+    };
 
-        // Calculate max width for clipping (simple bounds check against screen edges)
-        let max_width = (width as i32) - left * 2;
+    // Block alignment offset
+    let block_alignment = config.general.metric_alignment.to_lowercase();
+    let total_block_width = columns as i32 * col_width;
+    
+    let block_x_offset = match block_alignment.as_str() {
+        "center" => (width as i32 - total_block_width) / 2,
+        "right" => width as i32 - total_block_width - left_margin,
+        _ => left_margin, // left
+    };
+
+    for (i, metric_id) in metrics.iter().enumerate() {
+        let col = i / metrics_per_column;
+        let row = i % metrics_per_column;
+        
+        let x = block_x_offset + (col as i32 * col_width);
+        let y = start_y + (row as i32 * line_height);
 
         items.push(LayoutItem {
-            metric_id: metric_id.clone(),
+            metric_id: (*metric_id).clone(),
             label: metric_id.replace("_", " ").to_uppercase(),
             x,
             y,
-            max_width,
+            label_value_spacing: config.general.label_value_spacing,
+            max_width: col_width - 40, // Padding for safety
             alignment: "left".to_string(),
             clip: false,
         });
