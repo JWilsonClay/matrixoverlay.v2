@@ -1,0 +1,65 @@
+project: matrixoverlay.v2
+version: 1.0
+verification_gate: "cargo check"
+
+target_architecture: |
+  Modularize the monolithic src/ directory into a domain-driven structure:
+  - core/: Fundamental app logic, config, layout, and windowing.
+  - metrics/: Metric collection engine and individual collectors.
+  - render/: Cairo/Pango rendering pipeline and layer management.
+  - ui/: Tray and GUI interaction layers.
+
+files:
+  - source: src/main.rs
+    target: src/core/main.rs
+    action: MOVE
+  - source: src/config.rs
+    target: src/core/config.rs
+    action: MOVE
+  - source: src/layout.rs
+    target: src/core/layout.rs
+    action: MOVE
+  - source: src/window.rs
+    target: src/core/window.rs
+    action: MOVE
+  - source: src/timer.rs
+    target: src/core/timer.rs
+    action: MOVE
+  - source: src/version.rs
+    target: src/core/version.rs
+    action: MOVE
+  - source: src/logging.rs
+    target: src/core/logging.rs
+    action: MOVE
+  - source: src/path_utils.rs
+    target: src/core/path_utils.rs
+    action: MOVE
+  - source: src/metrics.rs
+    target: src/metrics/mod.rs
+    action: SPLIT
+    notes: "Will be decomposed into collectors/ sub-modules in later phases"
+  - source: src/render.rs
+    target: src/render/mod.rs
+    action: SPLIT
+    notes: "Will be decomposed into layers/ (rain, metrics) in later phases"
+  - source: src/tray.rs
+    target: src/ui/tray.rs
+    action: MOVE
+  - source: src/gui.rs
+    target: src/ui/gui.rs
+    action: MOVE
+  - source: src/lib.rs
+    target: src/lib.rs
+    action: KEEP
+  - source: src/reproduce_tray.rs
+    target: src/reproduce_tray.rs
+    action: ARCHIVE
+  - source: src/build_logger.rs
+    target: src/build_logger.rs
+    action: ARCHIVE
+  - source: src/clean.ps1
+    target: src/clean.ps1
+    action: ARCHIVE
+  - source: src/nvidia_mock.txt
+    target: tests/test_data/nvidia_mock.txt
+    action: MOVE
