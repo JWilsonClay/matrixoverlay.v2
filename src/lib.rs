@@ -10,3 +10,11 @@ pub mod logging;
 pub mod version;
 pub mod build_logger;
 pub mod gui;
+
+// --- REFACTOR BRIDGES (Phase 1) ---
+pub mod core;
+pub mod ui;
+#[path = "metrics/shim.rs"]
+pub mod metrics_bridge;
+#[path = "render/shim.rs"]
+pub mod render_bridge;
