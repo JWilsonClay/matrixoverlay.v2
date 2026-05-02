@@ -1,6 +1,7 @@
 pub mod main;
 pub mod config;
 pub mod layout;
+pub mod productivity;
 pub mod window;
 pub mod timer;
 pub mod version;

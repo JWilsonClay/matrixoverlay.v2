@@ -414,3 +414,54 @@ pub fn create_all_windows(conn: &xcb::Connection, config: &Config) -> Result<Win
 
     Ok(WindowManager { monitors: contexts })
 }
+
+/// Finds the X11 keycode for a given keysym.
+pub fn find_keycode(conn: &xcb::Connection, keysym: u32) -> Result<Option<u8>> {
+    let setup = conn.get_setup();
+    let min_keycode = setup.min_keycode();
+    let max_keycode = setup.max_keycode();
+    let count = max_keycode - min_keycode + 1;
+
+    let cookie = conn.send_request(&x::GetKeyboardMapping {
+        first_keycode: min_keycode,
+        count,
+    });
+    let reply = conn.wait_for_reply(cookie)?;
+    
+    let keysyms = reply.keysyms();
+    let keysyms_per_keycode = reply.keysyms_per_keycode() as usize;
+
+    for (i, &sym) in keysyms.iter().enumerate() {
+        if sym == keysym {
+            let keycode_offset = i / keysyms_per_keycode;
+            let keycode = min_keycode as usize + keycode_offset;
+            return Ok(Some(keycode as u8));
+        }
+    }
+    Ok(None)
+}
+
+/// Grabs a key combination with all lock-modifier permutations (CapsLock, NumLock).
+pub fn grab_key_combinations(conn: &xcb::Connection, root: x::Window, keycode: u8, base_mods: x::ModMask) -> Result<()> {
+    let modifiers = [
+        base_mods,
+        base_mods | x::ModMask::LOCK,
+        base_mods | x::ModMask::N2,
+        base_mods | x::ModMask::LOCK | x::ModMask::N2,
+    ];
+
+    for &mods in &modifiers {
+        let cookie = conn.send_request_checked(&x::GrabKey {
+            owner_events: true,
+            grab_window: root,
+            modifiers: mods,
+            key: keycode,
+            pointer_mode: x::GrabMode::Async,
+            keyboard_mode: x::GrabMode::Async,
+        });
+        if let Err(e) = conn.check_request(cookie) {
+            log::warn!("Failed to grab hotkey (keycode {}, mod {:?}): {}", keycode, mods, e);
+        }
+    }
+    Ok(())
+}
