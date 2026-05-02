@@ -178,4 +178,31 @@ mod tests {
         manager.update(Duration::from_millis(16), 1920, 1080, &config);
         assert!(manager.streams[0].y < 0.0);
     }
+
+    #[test]
+    fn test_rain_pause_mode() {
+        let mut config = Config::default();
+        config.cosmetics.rain_speed = 0.0;
+        let mut manager = RainManager::new(5);
+        manager.update(Duration::from_millis(16), 1920, 1080, &config);
+        let start_y = manager.streams[0].y;
+        manager.update(Duration::from_millis(100), 1920, 1080, &config);
+        assert_eq!(manager.streams[0].y, start_y, "Y position should not change when speed is 0");
+    }
+
+    #[test]
+    fn test_rain_stream_glyph_mutation() {
+        let config = Config::default();
+        let mut manager = RainManager::new(1);
+        manager.update(Duration::from_millis(16), 1920, 1080, &config);
+        let initial_glyphs = manager.streams[0].glyphs.clone();
+        
+        // Run many updates to trigger probabilistic glyph mutation (gen_bool(0.05))
+        for _ in 0..200 {
+            manager.update(Duration::from_millis(16), 1920, 1080, &config);
+        }
+        
+        let mutated = manager.streams[0].glyphs != initial_glyphs;
+        assert!(mutated, "Glyphs should eventually mutate during updates");
+    }
 }
