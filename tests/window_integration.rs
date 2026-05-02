@@ -8,8 +8,8 @@ use xcb::x;
 use xcb::shape;
 use xcb::Xid;
 
-use matrix_overlay::config::Config;
-use matrix_overlay::window::create_all_windows;
+use matrix_overlay::core::config::Config;
+use matrix_overlay::core::window::create_all_windows;
 
 /// Helper to setup X11 connection for tests.
 /// Returns None if X server is unavailable.

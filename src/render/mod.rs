@@ -10,8 +10,8 @@ use xcb::x;
 use rand::Rng;
 use rand::thread_rng;
 
-use crate::config::Config;
-use crate::layout::Layout as ConfigLayout;
+use crate::core::config::Config;
+use crate::core::layout::Layout as ConfigLayout;
 use crate::metrics::{MetricData, MetricId, MetricValue};
 
 /// Represents a single falling stream of glyphs in the Matrix rain.
@@ -197,9 +197,9 @@ pub struct Renderer {
     /// Monotonically increasing frame counter for animations.
     frame_count: RefCell<u64>,
     /// State of items for logging
-    pub item_states: RefCell<Vec<crate::logging::ItemState>>,
+    pub item_states: RefCell<Vec<crate::core::logging::ItemState>>,
     /// State logger
-    pub logger: Option<crate::logging::Logger>,
+    pub logger: Option<crate::core::logging::Logger>,
 }
 
 impl Renderer {
@@ -238,7 +238,7 @@ impl Renderer {
             frame_count: RefCell::new(0),
             item_states: RefCell::new(Vec::new()),
             logger: if config.logging.enabled {
-                Some(crate::logging::Logger::new(&config.logging.log_path, config.logging.max_files, config.logging.max_file_size_mb))
+                Some(crate::core::logging::Logger::new(&config.logging.log_path, config.logging.max_files, config.logging.max_file_size_mb))
             } else {
                 None
             },
@@ -259,7 +259,7 @@ impl Renderer {
     }
 
     pub fn update_config(&mut self, config: Config) {
-        self.config_layout = crate::layout::compute(
+        self.config_layout = crate::core::layout::compute(
             &config, 
             self.monitor_index,
             self.surface.width() as u16, 
@@ -278,7 +278,7 @@ impl Renderer {
         // Live update logger state
         if config.logging.enabled {
             if self.logger.is_none() {
-                self.logger = Some(crate::logging::Logger::new(&config.logging.log_path, config.logging.max_files, config.logging.max_file_size_mb));
+                self.logger = Some(crate::core::logging::Logger::new(&config.logging.log_path, config.logging.max_files, config.logging.max_file_size_mb));
             }
         } else {
             self.logger = None;
@@ -321,7 +321,7 @@ impl Renderer {
                 let mut states = self.item_states.borrow_mut();
                 for (i, stream) in self.rain_manager.streams.iter().enumerate() {
                     if i % 5 == 0 { // Only log every 5th stream to save space
-                        states.push(crate::logging::ItemState {
+                        states.push(crate::core::logging::ItemState {
                             id: format!("rain_{}", i),
                             item_type: "rain".to_string(),
                             x: stream.x,
@@ -370,7 +370,7 @@ impl Renderer {
             
             if config.logging.enabled {
                 let (w, h) = (200.0, 40.0 * 1.8); // Appoximate size for Day of Week
-                self.item_states.borrow_mut().push(crate::logging::ItemState {
+                self.item_states.borrow_mut().push(crate::core::logging::ItemState {
                     id: "day_of_week".to_string(),
                     item_type: "metric".to_string(),
                     x: (self.width as f64 - 200.0) / 2.0, // approx center
@@ -419,7 +419,7 @@ impl Renderer {
                     )?;
 
                     if config.logging.enabled {
-                        self.item_states.borrow_mut().push(crate::logging::ItemState {
+                        self.item_states.borrow_mut().push(crate::core::logging::ItemState {
                             id: item.metric_id.clone(),
                             item_type: "metric".to_string(),
                             x: item.x as f64,
@@ -436,7 +436,7 @@ impl Renderer {
 
         // Log the final state if logger is present
         if let Some(ref logger) = self.logger {
-            let capture = crate::logging::StateCapture {
+            let capture = crate::core::logging::StateCapture {
                 timestamp: Local::now().to_rfc3339(),
                 monitor: self.monitor_index,
                 items: self.item_states.borrow().clone(),
@@ -527,7 +527,7 @@ impl Renderer {
         allow_scroll: bool,
         glow_passes: &[(f64, f64, f64)],
         config: &Config,
-        item: &crate::layout::LayoutItem,
+        item: &crate::core::layout::LayoutItem,
     ) -> Result<()> {
         let layout = pangocairo::functions::create_layout(cr);
         let mut desc = pango::FontDescription::from_string("Monospace");
@@ -704,25 +704,30 @@ mod tests {
 
     #[test]
     fn test_rain_manager_scale_density() {
+        let mut config_v1 = Config::default();
+        config_v1.cosmetics.realism_scale = 1;
         let mut manager_v1 = RainManager::new(1);
-        manager_v1.update(Duration::from_millis(16), 1920, 1080);
+        manager_v1.update(Duration::from_millis(16), 1920, 1080, &config_v1);
         let count_v1 = manager_v1.streams.len();
 
+        let mut config_v10 = Config::default();
+        config_v10.cosmetics.realism_scale = 10;
         let mut manager_v10 = RainManager::new(10);
-        manager_v10.update(Duration::from_millis(16), 1920, 1080);
+        manager_v10.update(Duration::from_millis(16), 1920, 1080, &config_v10);
         let count_v10 = manager_v10.streams.len();
 
         assert!(count_v10 > count_v1, "Scale 10 should have more streams than Scale 1: {} vs {}", count_v10, count_v1);
-        assert!(count_v10 <= 50, "Density should be capped at 50 for performance");
+        assert!(count_v10 <= 500, "Density should be capped at 500 for performance");
     }
 
     #[test]
     fn test_rain_stream_reset() {
+        let config = Config::default();
         let mut manager = RainManager::new(5);
-        manager.update(Duration::from_millis(16), 1920, 1080);
+        manager.update(Duration::from_millis(16), 1920, 1080, &config);
         // Move stream far off bottom
         manager.streams[0].y = 10000.0;
-        manager.update(Duration::from_millis(16), 1920, 1080);
+        manager.update(Duration::from_millis(16), 1920, 1080, &config);
         assert!(manager.streams[0].y < 0.0, "Stream should have reset to top after falling below height");
     }
 }

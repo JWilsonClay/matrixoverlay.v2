@@ -17,17 +17,17 @@ use simplelog::{WriteLogger, TermLogger, Config as LogConfig, LevelFilter, Termi
 use chrono::Local;
 use xcb::x;
 
-use crate::config::Config;
-use crate::window::create_all_windows;
+use crate::core::config::Config;
+use crate::core::window::create_all_windows;
 use crate::metrics::{MetricData, MetricId, MetricValue, MetricsCommand, spawn_metrics_thread};
 use crate::render::Renderer;
-use crate::layout::{self, Layout};
-use crate::logging;
-use crate::version;
+use crate::core::layout::{self, Layout};
+use crate::core::logging;
+use crate::core::version;
 use crate::build_logger;
-use crate::path_utils;
-use crate::tray::{SystemTray, MENU_QUIT_ID, MENU_RELOAD_ID, MENU_EDIT_ID, MENU_THEME_CLASSIC, MENU_THEME_CALM, MENU_THEME_ALERT, MENU_TOGGLE_AUTO_COMMIT, MENU_TOGGLE_OLLAMA, MENU_CONFIG_GUI_ID, MENU_CONFIG_JSON_ID};
-use crate::gui::{GuiEvent, ConfigWindow};
+use crate::core::path_utils;
+use crate::ui::tray::{SystemTray, MENU_QUIT_ID, MENU_RELOAD_ID, MENU_EDIT_ID, MENU_THEME_CLASSIC, MENU_THEME_CALM, MENU_THEME_ALERT, MENU_TOGGLE_AUTO_COMMIT, MENU_TOGGLE_OLLAMA, MENU_CONFIG_GUI_ID, MENU_CONFIG_JSON_ID};
+use crate::ui::gui::{GuiEvent, ConfigWindow};
 
 pub fn run() -> Result<()> {
     // 1. Load Config First (to determine logging)

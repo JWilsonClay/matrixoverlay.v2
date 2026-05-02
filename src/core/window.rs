@@ -7,7 +7,7 @@ use xcb::x;
 use xcb::shape;
 use xcb::Xid;
 use cairo::{ImageSurface, Format, Context as CairoContext};
-use crate::config::Config;
+use crate::core::config::Config;
 
 /// Represents a physical monitor detected via RandR.
 #[derive(Debug, Clone)]

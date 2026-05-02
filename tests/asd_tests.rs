@@ -1,4 +1,4 @@
-use matrix_overlay::config::Config;
+use matrix_overlay::core::config::Config;
 
 #[test]
 fn test_asd_readability_defaults() {

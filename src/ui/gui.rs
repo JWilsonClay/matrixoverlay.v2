@@ -2,7 +2,7 @@ use gtk::prelude::*;
 use gtk::{Window, WindowType, Notebook, Box, Orientation, Label, CheckButton, SpinButton, ComboBoxText, Button, Entry, ScrolledWindow, Adjustment, PolicyType};
 use std::sync::Arc;
 use crossbeam_channel::Sender;
-use crate::config::Config;
+use crate::core::config::Config;
 
 pub enum GuiEvent {
     Reload,

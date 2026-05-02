@@ -11,13 +11,13 @@ use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use chrono::{Datelike, Local};
-use crate::config::Config;
+use crate::core::config::Config;
 use sysinfo::{System, SystemExt, CpuExt};
 use sysinfo::DiskExt;
 use serde::Deserialize;
 use git2::Repository;
 use crossbeam_channel::{unbounded, Sender};
-use crate::path_utils;
+use crate::core::path_utils;
 use std::io::Read;
     
 
@@ -819,11 +819,11 @@ impl MetricCollector for HwmonCollector {
 /// Collector for Custom Files (e.g. shared logs).
 #[derive(Debug)]
 pub struct FileCollector {
-    files: Vec<crate::config::CustomFile>,
+    files: Vec<crate::core::config::CustomFile>,
 }
 
 impl FileCollector {
-    pub fn new(files: Vec<crate::config::CustomFile>) -> Self {
+    pub fn new(files: Vec<crate::core::config::CustomFile>) -> Self {
         Self { files }
     }
 }
@@ -1333,7 +1333,7 @@ mod tests {
 
     #[test]
     fn test_path_traversal_blocked() {
-        assert!(!crate::path_utils::is_safe_path(Path::new("/etc/passwd")));
-        assert!(!crate::path_utils::is_safe_path(Path::new("../.ssh/id_rsa")));
+        assert!(!crate::core::path_utils::is_safe_path(Path::new("/etc/passwd")));
+        assert!(!crate::core::path_utils::is_safe_path(Path::new("../.ssh/id_rsa")));
     }
 }

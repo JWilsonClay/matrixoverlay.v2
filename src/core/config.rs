@@ -95,7 +95,7 @@ fn default_batch_cap() -> u32 { 5 }
 /// Cosmetic and animation configuration.
 /// 
 /// Ties to Stage 0: Matrix Aesthetics (<1% CPU goal).
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Cosmetics {
     /// Rain mode: "fall" (classic), "pulse" (low-resource glow), or "off".
     #[serde(default = "default_rain_mode")]
@@ -127,6 +127,23 @@ pub struct Cosmetics {
     /// Last used performance preset (minimal, medium, extreme)
     #[serde(default = "default_preset")]
     pub perf_preset: String,
+}
+
+impl Default for Cosmetics {
+    fn default() -> Self {
+        Self {
+            rain_mode: default_rain_mode(),
+            realism_scale: default_realism(),
+            occlusion_enabled: default_true(),
+            rain_speed: default_rain_speed(),
+            metrics_brightness: default_brightness(),
+            matrix_brightness: default_brightness(),
+            border_enabled: false,
+            border_color: default_border_color(),
+            background_opacity: default_bg_opacity(),
+            perf_preset: default_preset(),
+        }
+    }
 }
 
 fn default_rain_speed() -> f64 { 1.0 }
@@ -298,12 +315,12 @@ impl Config {
 
         // Security Path Validation
         for file in &self.custom_files {
-            if !crate::path_utils::is_safe_path(std::path::Path::new(&file.path)) {
+            if !crate::core::path_utils::is_safe_path(std::path::Path::new(&file.path)) {
                 log::warn!("Security Warning: Unsafe path detected in custom_files: {}", file.path);
             }
         }
         for repo in &self.productivity.repos {
-            if !crate::path_utils::is_safe_path(std::path::Path::new(repo)) {
+            if !crate::core::path_utils::is_safe_path(std::path::Path::new(repo)) {
                 log::warn!("Security Warning: Unsafe Git repo path: {}", repo);
             }
         }

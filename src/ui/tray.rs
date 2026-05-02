@@ -1,7 +1,7 @@
 // src/tray.rs
 use anyhow::Result;
 use tray_icon::{Icon, TrayIconBuilder, menu::{Menu, MenuItem, PredefinedMenuItem, Submenu, CheckMenuItem}};
-use crate::config::Config;
+use crate::core::config::Config;
 
 pub const MENU_QUIT_ID: &str = "quit";
 pub const MENU_RELOAD_ID: &str = "reload";

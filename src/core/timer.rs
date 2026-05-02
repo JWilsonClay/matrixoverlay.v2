@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use crossbeam_channel::Sender;
 use chrono::Datelike;
 
-use crate::config::Config;
+use crate::core::config::Config;
 use crate::metrics::{
     SharedMetrics, MetricData, MetricId, MetricCollector,
     SysinfoManager, CpuCollector, MemoryCollector, UptimeLoadCollector,

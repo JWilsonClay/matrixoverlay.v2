@@ -11,12 +11,12 @@ use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use xcb::x;
 
-use matrix_overlay::config::Config;
+use matrix_overlay::core::config::Config;
 use matrix_overlay::metrics::{
     HwmonCollector, MetricId, MetricCollector, NvidiaSmiCollector, 
     SysinfoCollector, SysinfoManager, MetricValue
 };
-use matrix_overlay::window::create_all_windows;
+use matrix_overlay::core::window::create_all_windows;
 
 /// Confirm NVIDIA GPU access via nvidia-smi (Target: RTX 3050 Ti)
 #[test]
@@ -26,7 +26,7 @@ fn test_nvidia_gpu_access() {
         return;
     }
 
-    let mut collector = NvidiaSmiCollector::new();
+    let mut collector = NvidiaSmiCollector::new("celsius".to_string());
     let map = collector.collect();
     
     match map.get(&MetricId::GpuTemp) {
@@ -72,7 +72,7 @@ fn test_amd_igpu_detection() {
 /// Test Fan Speed reading (Dell SMM or similar)
 #[test]
 fn test_fan_readings() {
-    let mut collector = HwmonCollector::new();
+    let mut collector = HwmonCollector::new("celsius".to_string());
     let map = collector.collect();
     
     if let Some(MetricValue::String(rpm_str)) = map.get(&MetricId::FanSpeed) {

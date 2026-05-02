@@ -1,7 +1,7 @@
 //! Layout calculation and validation.
 //! Handles adaptive positioning, safe zones, and config validation.
 
-use crate::config::Config;
+use crate::core::config::Config;
 use anyhow::Result;
 use std::collections::HashSet;
 
