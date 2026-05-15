@@ -16,7 +16,7 @@ use xcb::x;
 
 use crate::core::config::Config;
 use crate::core::window::{create_all_windows, find_keycode, grab_key_combinations};
-use crate::metrics::{MetricsCommand, spawn_metrics_thread};
+use crate::metrics::{MetricsCommand, spawn_metrics_thread, MetricId, MetricValue};
 use crate::render::Renderer;
 use crate::core::{layout, logging, version, productivity};
 use crate::build_logger;
@@ -221,7 +221,19 @@ pub fn run() -> Result<()> {
                     if visible {
                         let dt = last_draw.elapsed();
                         last_draw = Instant::now();
-                        if let Ok(shared) = metrics_arc.lock() {
+                        if let Ok(mut shared) = metrics_arc.lock() {
+                            // **[NEW: Coordinate Anchoring]**
+                            // Check if a fresh location was detected by the metrics collectors.
+                            if let Some(MetricValue::Location(lat, lon)) = shared.data.values.remove(&MetricId::LocationData) {
+                                if config_overlay.weather.lat != lat || config_overlay.weather.lon != lon {
+                                    log::info!("[Security] Anchoring newly detected location ({}, {}) to config.json", lat, lon);
+                                    config_overlay.weather.lat = lat;
+                                    config_overlay.weather.lon = lon;
+                                    config_overlay.weather.auto_location = false; // Disable auto-lookup once anchored
+                                    let _ = config_overlay.save();
+                                }
+                            }
+
                             for (i, renderer) in renderers.iter_mut().enumerate() {
                                 if let Some(ctx) = wm.monitors.get(i) {
                                     let _ = renderer.draw(&conn_arc, ctx.window, &config_overlay, &shared.data, dt);

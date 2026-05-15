@@ -16,6 +16,22 @@ pub struct ItemState {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VisualElement {
+    pub label: String,
+    pub value: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VisualFrame {
+    pub timestamp: String,
+    pub monitor: usize,
+    pub elements: Vec<VisualElement>,
+    pub rain_density: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StateCapture {
     pub timestamp: String,
     pub monitor: usize,
@@ -47,6 +63,18 @@ impl Logger {
         
         let ascii = self.render_ascii_view(capture);
         self.write_to_file("visual.log", &ascii);
+    }
+
+    pub fn log_visual_frame(&self, frame: &VisualFrame) {
+        let json = serde_json::to_string(frame).unwrap_or_default();
+        self.write_to_file("trace.log", &json);
+        
+        // Compact readable format for human auditing
+        let mut line = format!("Monitor {}: ", frame.monitor);
+        for el in &frame.elements {
+            line.push_str(&format!("[{}: {}] ", el.label, el.value));
+        }
+        self.write_to_file("manifest.log", &line);
     }
 
     /// Purges all debug log files in the specified directory.

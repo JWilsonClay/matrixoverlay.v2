@@ -49,6 +49,7 @@ pub enum MetricId {
     DayOfWeek,
     CodeDelta,
     OverlayCpu,
+    LocationData,
     Custom(String),
 }
 
@@ -72,6 +73,7 @@ impl MetricId {
             "day_of_week" => Some(Self::DayOfWeek),
             "code_delta" => Some(Self::CodeDelta),
             "overlay_cpu" => Some(Self::OverlayCpu),
+            "location_data" => Some(Self::LocationData),
             other => Some(Self::Custom(other.to_string())),
         }
     }
@@ -95,6 +97,7 @@ impl MetricId {
             Self::DayOfWeek => "day_of_week",
             Self::CodeDelta => "code_delta",
             Self::OverlayCpu => "overlay_cpu",
+            Self::LocationData => "location_data",
             Self::Custom(s) => s.as_str(),
         }
     }
@@ -118,6 +121,7 @@ impl MetricId {
             Self::DayOfWeek => "Day",
             Self::CodeDelta => "Delta",
             Self::OverlayCpu => "Overlay CPU",
+            Self::LocationData => "Location",
             Self::Custom(s) => s.as_str(),
         }.to_string()
     }
@@ -140,6 +144,7 @@ impl MetricData {
                 MetricValue::Float(f) => format!("{:?}: {:.1}", k, f),
                 MetricValue::Int(i) => format!("{:?}: {}", k, i),
                 MetricValue::String(s) => format!("{:?}: \"{}\"", k, s),
+                MetricValue::Location(lat, lon) => format!("{:?}: ({:.2}, {:.2})", k, lat, lon),
                 MetricValue::None => format!("{:?}: None", k),
             }
         }).collect::<Vec<_>>().join(", ");
@@ -154,6 +159,7 @@ pub enum MetricValue {
     Int(i64),
     String(String),
     NetworkMap(HashMap<String, (u64, u64)>),
+    Location(f64, f64),
     None,
 }
 

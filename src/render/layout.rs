@@ -28,6 +28,7 @@ pub fn format_metric_value(value: &MetricValue) -> String {
                 parts.join(" | ")
             }
         },
+        MetricValue::Location(lat, lon) => format!("({:.2}, {:.2})", lat, lon),
         MetricValue::None => "---".to_string(),
     }
 }
@@ -118,7 +119,7 @@ pub fn draw_day_of_week(
     glow_passes: &[(f64, f64, f64)], 
     config: &Config,
     base_color: (f64, f64, f64)
-) -> Result<()> {
+) -> Result<Option<crate::core::logging::VisualElement>> {
     cr.save()?;
     let layout = pangocairo::functions::create_layout(cr);
     
@@ -144,7 +145,7 @@ pub fn draw_day_of_week(
     draw_text_glow_at(cr, &layout, x, y, theme_color, glow_passes, config)?;
     
     cr.restore()?;
-    Ok(())
+    Ok(Some(crate::core::logging::VisualElement { label: "DayOfWeek".to_string(), value: header_text.to_string(), x: box_x, y: box_y }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -162,7 +163,7 @@ pub fn draw_metric_pair(
     item: &LayoutItem,
     base_color: (f64, f64, f64),
     scroll_offsets: &mut HashMap<String, f64>
-) -> Result<()> {
+) -> Result<Option<crate::core::logging::VisualElement>> {
     let layout = pangocairo::functions::create_layout(cr);
     let mut desc = pango::FontDescription::from_string("Monospace");
     desc.set_size((config.general.metric_font_size as f64 * pango::SCALE as f64) as i32);
@@ -220,5 +221,5 @@ pub fn draw_metric_pair(
     draw_text_glow_at(cr, &layout, draw_x, centered_y, base_color, glow_passes, config)?;
 
     cr.restore()?;
-    Ok(())
+    Ok(Some(crate::core::logging::VisualElement { label: label.to_string(), value: value.to_string(), x, y }))
 }

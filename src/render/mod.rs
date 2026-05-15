@@ -30,6 +30,7 @@ pub struct Renderer {
     rain_manager: RainManager,
     frame_count: RefCell<u64>,
     pub item_states: RefCell<Vec<crate::core::logging::ItemState>>,
+    pub visual_elements: RefCell<Vec<crate::core::logging::VisualElement>>,
     pub logger: Option<crate::core::logging::Logger>,
 }
 
@@ -67,6 +68,7 @@ impl Renderer {
             rain_manager: RainManager::new(config.cosmetics.realism_scale),
             frame_count: RefCell::new(0),
             item_states: RefCell::new(Vec::new()),
+            visual_elements: RefCell::new(Vec::new()),
             logger: if config.logging.enabled {
                 Some(crate::core::logging::Logger::new(&config.logging.log_path, config.logging.max_files, config.logging.max_file_size_mb))
             } else {
@@ -133,6 +135,7 @@ impl Renderer {
         );
 
         self.item_states.borrow_mut().clear();
+        self.visual_elements.borrow_mut().clear();
 
         if config.cosmetics.rain_mode == "fall" {
             self.rain_manager.draw(&cr, self.width as f64, self.height as f64, frame_count, config)?;
@@ -183,7 +186,9 @@ impl Renderer {
                 layout::draw_occlusion_box(&cr, box_x, box_y, box_w, box_h, config)?;
             }
             
-            layout::draw_day_of_week(&cr, &header_text, box_x, box_y, box_w, box_h, &config.general.glow_passes, config, self.color_rgb)?;
+            if let Ok(Some(el)) = layout::draw_day_of_week(&cr, &header_text, box_x, box_y, box_w, box_h, &config.general.glow_passes, config, self.color_rgb) {
+                self.visual_elements.borrow_mut().push(el);
+            }
             
             if config.logging.enabled {
                 let (w, h) = (200.0, 40.0 * 1.8);
@@ -211,7 +216,7 @@ impl Renderer {
                     let label = if item.label.is_empty() { id.label() } else { item.label.clone() };
                     let allow_scroll = item.metric_id == "network_details" || item.metric_id.contains("weather");
                     
-                    layout::draw_metric_pair(
+                    if let Ok(Some(el)) = layout::draw_metric_pair(
                         &cr,
                         &label, 
                         &value_str, 
@@ -225,7 +230,9 @@ impl Renderer {
                         item,
                         self.color_rgb,
                         &mut self.scroll_offsets.borrow_mut()
-                    )?;
+                    ) {
+                        self.visual_elements.borrow_mut().push(el);
+                    }
 
                     if config.logging.enabled {
                         self.item_states.borrow_mut().push(crate::core::logging::ItemState {
@@ -248,6 +255,14 @@ impl Renderer {
                 items: self.item_states.borrow().clone(),
             };
             logger.log_state(&capture);
+
+            let frame = crate::core::logging::VisualFrame {
+                timestamp: Local::now().to_rfc3339(),
+                monitor: self.monitor_index,
+                elements: self.visual_elements.borrow().clone(),
+                rain_density: self.rain_manager.streams.len(),
+            };
+            logger.log_visual_frame(&frame);
         }
 
         drop(cr);

@@ -24,6 +24,10 @@ pub struct OpenMeteoCollector {
     auto_location: bool,
     url_base: String,
     temp_unit: String,
+    last_fetch: Option<std::time::Instant>,
+    last_success: Option<std::time::Instant>,
+    cache_temp: Option<String>,
+    cache_condition: Option<String>,
 }
 
 impl OpenMeteoCollector {
@@ -35,6 +39,10 @@ impl OpenMeteoCollector {
             auto_location,
             url_base: "https://api.open-meteo.com".to_string(),
             temp_unit: "celsius".to_string(),
+            last_fetch: None,
+            last_success: None,
+            cache_temp: None,
+            cache_condition: None,
         }
     }
 
@@ -46,6 +54,10 @@ impl OpenMeteoCollector {
             auto_location,
             url_base: "https://api.open-meteo.com".to_string(),
             temp_unit,
+            last_fetch: None,
+            last_success: None,
+            cache_temp: None,
+            cache_condition: None,
         }
     }
 
@@ -57,6 +69,10 @@ impl OpenMeteoCollector {
             auto_location: false,
             url_base: url,
             temp_unit: "celsius".to_string(),
+            last_fetch: None,
+            last_success: None,
+            cache_temp: None,
+            cache_condition: None,
         }
     }
 
@@ -116,8 +132,27 @@ impl MetricCollector for OpenMeteoCollector {
             return map;
         }
 
+        // **[NEW: Throttling & Caching Logic]**
+        let now = std::time::Instant::now();
+        let minute = Duration::from_secs(60);
+        let stale_limit = Duration::from_secs(15 * 60);
+
+        // If we fetched recently, return cached values immediately
+        if let Some(last) = self.last_fetch {
+            if now.duration_since(last) < minute {
+                if let Some(temp) = &self.cache_temp {
+                    map.insert(MetricId::WeatherTemp, MetricValue::String(temp.clone()));
+                }
+                if let Some(cond) = &self.cache_condition {
+                    map.insert(MetricId::WeatherCondition, MetricValue::String(cond.clone()));
+                }
+                return map;
+            }
+        }
+
+        self.last_fetch = Some(now);
+
         // **[HARDENING: Resource Resilience]**
-        // Using a centralized client with strict timeouts and user-agent to avoid hangs or blocks.
         let client = match reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(5))
             .user_agent("MatrixOverlay/2.0 (Security Hardened)")
@@ -127,37 +162,70 @@ impl MetricCollector for OpenMeteoCollector {
             Err(_) => return map,
         };
 
+        let mut fresh_location = false;
         if self.auto_location && (self.lat == 0.0 || self.lon == 0.0) {
              if let Ok((lat, lon)) = fetch_geoip_location() {
                  self.lat = lat;
                  self.lon = lon;
+                 fresh_location = true;
+                 // Report fresh location for anchoring to config.json
+                 map.insert(MetricId::LocationData, MetricValue::Location(lat, lon));
              }
         }
 
         let url = format!("{}/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code", self.url_base, self.lat, self.lon);
 
-        // **[HARDENING: Response Size Limit]**
-        // Limiting response reading to 10KB to prevent memory exhaustion DoS.
         match client.get(&url).send() {
             Ok(mut resp) => {
                 use std::io::Read;
                 let mut buffer = Vec::new();
                 if let Ok(_) = resp.by_ref().take(1024 * 10).read_to_end(&mut buffer) {
                     if let Ok(json) = serde_json::from_slice::<OpenMeteoResponse>(&buffer) {
-                        let mut temp = json.current.temperature_2m;
+                        let mut temp_val = json.current.temperature_2m;
                         let mut suffix = "°C";
                         if self.temp_unit == "fahrenheit" {
-                            temp = (temp * 9.0 / 5.0) + 32.0;
+                            temp_val = (temp_val * 9.0 / 5.0) + 32.0;
                             suffix = "°F";
                         }
-                        map.insert(MetricId::WeatherTemp, MetricValue::String(format!("{:.1}{}", temp, suffix)));
-                        map.insert(MetricId::WeatherCondition, MetricValue::String(Self::weather_code_str(json.current.weather_code)));
+                        
+                        let temp_str = format!("{:.1}{}", temp_val, suffix);
+                        let cond_str = Self::weather_code_str(json.current.weather_code);
+
+                        self.cache_temp = Some(temp_str.clone());
+                        self.cache_condition = Some(cond_str.clone());
+                        self.last_success = Some(now);
+
+                        map.insert(MetricId::WeatherTemp, MetricValue::String(temp_str));
+                        map.insert(MetricId::WeatherCondition, MetricValue::String(cond_str));
                     }
                 }
             },
             Err(e) => {
                 log::warn!("Weather fetch failed: {}", e);
-                map.insert(MetricId::WeatherTemp, MetricValue::String("N/A".to_string()));
+                
+                // **[NEW: Stale Cache Handling]**
+                if let Some(last_ok) = self.last_success {
+                    let elapsed = now.duration_since(last_ok);
+                    if elapsed < stale_limit {
+                        // Return silent cache
+                        if let Some(temp) = &self.cache_temp {
+                            map.insert(MetricId::WeatherTemp, MetricValue::String(temp.clone()));
+                        }
+                        if let Some(cond) = &self.cache_condition {
+                            map.insert(MetricId::WeatherCondition, MetricValue::String(cond.clone()));
+                        }
+                    } else {
+                        // Return stale cache with asterisk
+                        if let Some(temp) = &self.cache_temp {
+                            map.insert(MetricId::WeatherTemp, MetricValue::String(format!("{}*", temp)));
+                        }
+                        if let Some(cond) = &self.cache_condition {
+                            map.insert(MetricId::WeatherCondition, MetricValue::String(format!("{}*", cond)));
+                        }
+                    }
+                } else {
+                    map.insert(MetricId::WeatherTemp, MetricValue::String("N/A".to_string()));
+                }
             }
         }
         map
