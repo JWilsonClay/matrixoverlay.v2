@@ -1,10 +1,86 @@
-/target
-**/*.rs.bk
-**/*.bak
-config.json
-gemini_clock.md
+# ==============================================================================
+# Matrix Overlay v2: Sovereign .gitignore Registry
+# ==============================================================================
+# This registry enforces repository hygiene by excluding all runtime artifacts,
+# ephemeral logs, build substrates, and legacy archival directories.
+
+# ------------------------------------------------------------------------------
+# 1. Build & Distribution Substrates
+# ------------------------------------------------------------------------------
+/target/
+/dist/
+/release/
+Cargo.lock
+
+# ------------------------------------------------------------------------------
+# 2. Ephemeral Logs & Diagnostic Outputs
+# ------------------------------------------------------------------------------
 *.log
+logs/
+matrix_overlay.log
+e2e_app.log
 compile_log.txt
+check_output.txt
+soc_baseline_wc.txt
+debugger.log
+debuggerarchive.log
+*.err
+*.out
+
+# ------------------------------------------------------------------------------
+# 3. Archive & Legacy Governance
+# ------------------------------------------------------------------------------
+# Archive directories for superseded documentation and forensic backups.
+/legacy_docs/
 /backups/
-/logs/
+**/*.bak
+**/*.rs.bk
+**/*.old
+**/*.tmp
+
+# ------------------------------------------------------------------------------
+# 4. Local Configuration & Sensitive Substrates
+# ------------------------------------------------------------------------------
+# Configuration files containing local environment state.
+config.json
+config.user.json
+.env
+auth.json
+
+# ------------------------------------------------------------------------------
+# 5. Local Debugging Scripts & Forensic Tooling
+# ------------------------------------------------------------------------------
+# Scripts used for local environment repair, installation, and testing.
+debug_cycle.sh
+install_prereqs.sh
+repair_and_install.sh
+simulate_tray.sh
+verify_features.sh
+test_autocommit.sh
+debugger.py
+search_copy.py
+overlay
+diffcorrector
+nvidia_mock.txt
+
+# ------------------------------------------------------------------------------
+# 6. IDE & AI Engineering Substrates
+# ------------------------------------------------------------------------------
+# Metadata and cache directories for development environments and AI agents.
+.vscode/
+.idea/
+.clion/
+.doorway/
+.gemini/
+*.code-workspace
+gemini_clock.md
+
+# ------------------------------------------------------------------------------
+# 7. Documentation Manifests (Stale/Legacy)
+# ------------------------------------------------------------------------------
+# Purged manifest files handled by concept.md and DevJournal.md.
 matrixoverlay.v2.codebase.md
+
+# ==============================================================================
+# END OF REGISTRY
+# ==============================================================================

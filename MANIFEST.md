@@ -14,3 +14,6 @@ Each top-level folder has exactly one owner sentence. Agents and humans must res
 
 ## Root Directories (Auto-Synced)
 - [/root](file:///home/jwils/matrixoverlay.v2/) : [README](file:///home/jwils/matrixoverlay.v2/README.md)
+- [concept.md](file:///home/jwils/matrixoverlay.v2/concept.md) : Sovereign Intent & Concept
+- [DevJournal.md](file:///home/jwils/matrixoverlay.v2/DevJournal.md) : Historical Infrastructure & Workflow
+- [legacy_docs/](file:///home/jwils/matrixoverlay.v2/legacy_docs/) : Historical Archive
