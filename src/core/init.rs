@@ -19,14 +19,22 @@ pub fn init_logging(config: &Config) -> Result<()> {
 
     if config.logging.enabled {
         let log_dir = Path::new(&config.logging.log_path);
+        
+        // [HARDENING] Validate path safety before creating directory or file
+        if !crate::core::path_utils::is_safe_path(log_dir) {
+            log::error!("Security Alert: Unsafe log path detected in config: {}", config.logging.log_path);
+            return Ok(()); // Fail safe: don't crash, but don't log to unsafe path
+        }
+
         if !log_dir.exists() {
             fs::create_dir_all(log_dir).context("Failed to create log directory")?;
         }
         
+        let log_file_path = log_dir.join("matrix_overlay.log");
         let _ = WriteLogger::init(
             LevelFilter::Info,
             LogConfig::default(),
-            fs::File::create(log_dir.join("matrix_overlay.log")).context("Failed to create log file")?
+            fs::File::create(&log_file_path).context("Failed to create log file")?
         );
         println!("Logging enabled. Directory: {}", config.logging.log_path);
     } else {
