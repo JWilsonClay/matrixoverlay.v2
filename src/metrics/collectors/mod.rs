@@ -1,3 +1,4 @@
+//! Metrics Collector Substrates.
 pub mod system;
 pub mod hwmon;
 pub mod nvidia;
