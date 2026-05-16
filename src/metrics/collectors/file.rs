@@ -1,3 +1,4 @@
+//! Sovereign File Collector Substrate.
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -5,16 +6,14 @@ use std::io::Read;
 use crate::metrics::{MetricId, MetricValue, MetricCollector};
 use crate::core::path_utils;
 
-/// Collector for Custom Files (e.g. shared logs).
+/// [HARDENED] Collector for custom file monitoring with safety boundaries.
 #[derive(Debug)]
 pub struct FileCollector {
     files: Vec<crate::core::config::CustomFile>,
 }
 
 impl FileCollector {
-    pub fn new(files: Vec<crate::core::config::CustomFile>) -> Self {
-        Self { files }
-    }
+    pub fn new(files: Vec<crate::core::config::CustomFile>) -> Self { Self { files } }
 }
 
 impl MetricCollector for FileCollector {
@@ -23,24 +22,20 @@ impl MetricCollector for FileCollector {
     fn collect(&mut self) -> HashMap<MetricId, MetricValue> {
         let mut map = HashMap::new();
         for file in &self.files {
-            let file_path = Path::new(&file.path);
-            if !path_utils::is_safe_path(file_path) {
-                log::warn!("Access Denied: Path traversal detected or unsafe area: {}", file.path);
-                map.insert(MetricId::Custom(file.metric_id.clone()), MetricValue::String("ACCESS DENIED".to_string()));
-                continue;
-            }
+            let p = Path::new(&file.path);
+            
+            // [HARDENING] Strict path and symlink validation
+            if !path_utils::is_safe_path(p) { continue; }
+            if let Ok(m) = fs::symlink_metadata(p) { if m.file_type().is_symlink() { continue; } }
 
             let mut content = "N/A".to_string();
-            if let Ok(mut f) = fs::File::open(file_path) {
-                let mut buffer = Vec::new();
-                if f.by_ref().take(64 * 1024).read_to_end(&mut buffer).is_ok() {
-                    let s = String::from_utf8_lossy(&buffer);
-                    let s = s.trim();
-                    if file.tail {
-                        content = s.lines().last().unwrap_or("").to_string();
-                    } else {
-                        content = s.to_string();
-                    }
+            // [HARDENING] Resource-limited read (max 64KB)
+            if let Ok(mut f) = fs::File::open(p) {
+                let mut buf = Vec::new();
+                if f.by_ref().take(65536).read_to_end(&mut buf).is_ok() {
+                    let s = String::from_utf8_lossy(&buf);
+                    content = if file.tail { s.trim().lines().last().unwrap_or("").to_string() }
+                              else { s.trim().to_string() };
                 }
             }
             map.insert(MetricId::Custom(file.metric_id.clone()), MetricValue::String(content));
