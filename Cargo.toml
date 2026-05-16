@@ -3,8 +3,6 @@ name = "matrix-overlay"
 version = "0.1.1"
 edition = "2021"
 
-
-
 [dependencies]
 xcb = { version = "1.2", features = ["randr", "shape", "render", "xinput"] }
 cairo-rs = { version = "0.18", features = ["xcb", "png"] }
@@ -24,11 +22,14 @@ crossbeam-channel = "0.5"
 simplelog = "0.12"
 git2 = "0.18"
 ollama-rs = "0.1"
+self_update = "0.39"
+sha2 = "0.10"
+notify-rust = "4.11"
+rand = "0.8"
 
 # Optional dependencies for features
 reqwest = { version = "0.11", features = ["blocking", "json"], optional = true }
 tokio = { version = "1", features = ["full"], optional = true }
-rand = "0.8"
 
 [features]
 default = ["weather"]
@@ -44,7 +45,8 @@ name = "render_bench"
 harness = false
 
 [profile.release]
-opt-level = 3
+opt-level = "z"
 lto = true
 strip = true
 codegen-units = 1
+panic = "abort"

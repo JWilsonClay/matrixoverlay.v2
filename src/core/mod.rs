@@ -3,9 +3,10 @@ pub mod config;
 pub mod layout;
 pub mod productivity;
 pub mod window;
-pub mod timer;
-pub mod version;
 pub mod logging;
+pub mod init;
+pub mod threads;
 pub mod path_utils;
-// main.rs is handled by the crate root, but we create a placeholder here if needed.
-// For now, these are the shims.
+pub mod timer;
+pub mod update;
+pub mod version;

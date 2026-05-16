@@ -2,6 +2,7 @@
 use anyhow::Result;
 use tray_icon::{Icon, TrayIconBuilder, menu::{Menu, MenuItem, PredefinedMenuItem, Submenu, CheckMenuItem}};
 use crate::core::config::Config;
+use notify_rust::Notification;
 
 pub const MENU_QUIT_ID: &str = "quit";
 pub const MENU_RELOAD_ID: &str = "reload";
@@ -13,6 +14,7 @@ pub const MENU_TOGGLE_AUTO_COMMIT: &str = "toggle_auto_commit";
 pub const MENU_TOGGLE_OLLAMA: &str = "toggle_ollama";
 pub const MENU_CONFIG_GUI_ID: &str = "config_gui";
 pub const MENU_CONFIG_JSON_ID: &str = "config_json";
+pub const MENU_UPDATE_ID: &str = "update";
 
 pub struct SystemTray {
     _tray: tray_icon::TrayIcon,
@@ -69,6 +71,16 @@ impl SystemTray {
             .build()?;
 
         Ok(Self { _tray: tray, _menu: menu })
+    }
+
+    /// Displays a one-time notification bubble for a new update.
+    pub fn show_update_bubble(version: &str) {
+        let _ = Notification::new()
+            .summary("Matrix Overlay - Update Available")
+            .body(&format!("A new version (v{}) is ready for secure delivery.", version))
+            .icon("system-software-update")
+            .timeout(10000) // 10 seconds
+            .show();
     }
 }
 
