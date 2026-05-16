@@ -19,6 +19,11 @@ pub fn run() -> Result<()> {
     init::init_logging(&config)?;
     log::info!("Sovereign Substrate Initialized. v0.1.3-SOC");
 
+    // [HARDENING] Verify DISPLAY for X11 environments
+    if std::env::var("DISPLAY").is_err() {
+        anyhow::bail!("X11 Error: DISPLAY environment variable is not set. Matrix Overlay requires an active X session.");
+    }
+
     config.cosmetics.rain_mode = "fall".to_string();
     
     // 3. Spawn Metrics Hub
@@ -83,6 +88,8 @@ pub fn run() -> Result<()> {
         }
     }
 
-    shutdown.store(true, Ordering::Relaxed);
+    // [HARDENING] Graceful shutdown signal
+    shutdown.store(true, Ordering::SeqCst);
+    log::info!("Sovereign Substrate Shutting Down Cleanly.");
     Ok(())
 }

@@ -22,7 +22,7 @@ pub fn init_logging(config: &Config) -> Result<()> {
         
         // [HARDENING] Validate path safety before creating directory or file
         if !crate::core::path_utils::is_safe_path(log_dir) {
-            log::error!("Security Alert: Unsafe log path detected in config: {}", config.logging.log_path);
+            log::error!("SECURITY ALERT: Unsafe log path detected in config: {}", config.logging.log_path);
             return Ok(()); // Fail safe: don't crash, but don't log to unsafe path
         }
 
@@ -44,13 +44,20 @@ pub fn init_logging(config: &Config) -> Result<()> {
 }
 
 pub fn setup_xcb() -> Result<(Arc<xcb::Connection>, i32)> {
-    let (conn, screen_num) = xcb::Connection::connect(None).context("Failed to connect to X server")?;
+    let (conn, screen_num) = xcb::Connection::connect(None).context("Failed to connect to X server. Verify DISPLAY environment variable.")?;
     Ok((Arc::new(conn), screen_num))
 }
 
 pub fn setup_autostart() -> Result<()> {
     let home = env::var("HOME").context("HOME not set")?;
-    let autostart_dir = Path::new(&home).join(".config/autostart");
+    let home_path = Path::new(&home);
+    
+    // [HARDENING] Validate home path safety
+    if !crate::core::path_utils::is_safe_path(home_path) {
+        anyhow::bail!("Security Alert: Unsafe HOME path detected.");
+    }
+
+    let autostart_dir = home_path.join(".config/autostart");
     if !autostart_dir.exists() { fs::create_dir_all(&autostart_dir)?; }
     
     let desktop_file = autostart_dir.join("matrix-overlay.desktop");
@@ -58,7 +65,7 @@ pub fn setup_autostart() -> Result<()> {
     if desktop_file.exists() {
         let metadata = fs::symlink_metadata(&desktop_file)?;
         if metadata.file_type().is_symlink() {
-            log::warn!("Security Alert: Autostart file is a symlink. Removing for safety.");
+            log::warn!("SECURITY ALERT: Autostart file is a symlink. Removing for safety.");
             let _ = fs::remove_file(&desktop_file);
         }
     }
@@ -66,7 +73,7 @@ pub fn setup_autostart() -> Result<()> {
     if !desktop_file.exists() {
         let current_exe = env::current_exe()?;
         let content = format!(
-            "[Desktop Entry]\nType=Application\nName=Matrix Overlay\nExec={}\nX-GNOME-Autostart-enabled=true\n",
+            "[Desktop Entry]\nType=Application\nName=Matrix Overlay\nExec=\"{}\"\nX-GNOME-Autostart-enabled=true\n",
             current_exe.to_string_lossy()
         );
         fs::write(&desktop_file, content)?;
@@ -81,6 +88,13 @@ pub fn setup_autostart() -> Result<()> {
 }
 
 pub fn safe_exec(cmd: &str, args: &[&str]) -> Result<()> {
+    // [HARDENING] Whitelist of allowed execution binaries
+    let bin = Path::new(cmd).file_name().and_then(|f| f.to_str()).unwrap_or("");
+    if bin != "notify-send" && bin != "xdg-open" && bin != "git" && bin != "xsetroot" {
+         log::error!("SECURITY ALERT: safe_exec attempted unauthorized binary: {}", cmd);
+         anyhow::bail!("Unauthorized binary execution");
+    }
+
     let status = std::process::Command::new(cmd)
         .args(args)
         .stdin(std::process::Stdio::null())

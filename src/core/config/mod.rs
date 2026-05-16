@@ -9,6 +9,7 @@ use std::fs;
 use crate::core::config::defaults::*;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct General {
     pub font_size: u32,
     #[serde(default = "default_metric_font_size")]
@@ -36,6 +37,7 @@ pub struct General {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Screen {
     pub metrics: Vec<String>,
     pub x_offset: i32,
@@ -43,6 +45,7 @@ pub struct Screen {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Weather {
     pub lat: f64,
     pub lon: f64,
@@ -52,6 +55,7 @@ pub struct Weather {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct CustomFile {
     pub name: String,
     pub path: String,
@@ -61,6 +65,7 @@ pub struct CustomFile {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Productivity {
     #[serde(default)]
     pub repos: Vec<String>,
@@ -73,6 +78,7 @@ pub struct Productivity {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Cosmetics {
     #[serde(default = "default_rain_mode")]
     pub rain_mode: String,
@@ -114,6 +120,7 @@ impl Default for Cosmetics {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Logging {
     pub enabled: bool,
     pub log_path: String,
@@ -141,6 +148,7 @@ impl Default for Logging {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub general: General,
     pub screens: Vec<Screen>,
@@ -232,15 +240,18 @@ pub struct MetricsConfig {
 impl From<&Config> for MetricsConfig {
     fn from(config: &Config) -> Self {
         let mut metrics = std::collections::HashSet::new();
+        let mut nvidia_needed = false;
+
         for screen in &config.screens {
             for m in &screen.metrics {
                 if !config.weather.enabled && (m == "weather_temp" || m == "weather_condition") { continue; }
+                if m == "gpu_temp" || m == "gpu_usage" { nvidia_needed = true; }
                 metrics.insert(m.clone());
             }
         }
         Self {
             refresh_rate_ms: config.general.update_ms,
-            enable_nvidia: true,
+            enable_nvidia: nvidia_needed, // [HARDENING] Dynamic detection
             active_metrics: metrics.into_iter().collect(),
             latitude: config.weather.lat,
             longitude: config.weather.lon,

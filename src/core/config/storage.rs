@@ -4,6 +4,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use crate::core::config::Config;
 
 /// [HARDENING] Gets the config path and ensures it is safe from traversal attacks.
@@ -28,20 +30,32 @@ pub fn ensure_config_dir(config_dir: &Path) -> Result<()> {
             use std::os::unix::fs::PermissionsExt;
             let _ = fs::set_permissions(config_dir, fs::Permissions::from_mode(0o700));
         }
-    } else {
-        // [HARDENING] If directory exists, verify it is not a symlink to a sensitive area
-        let metadata = fs::symlink_metadata(config_dir).context("Failed to read metadata of config dir")?;
-        if metadata.file_type().is_symlink() {
-            anyhow::bail!("Security Alert: Config directory is a symlink. This is prohibited.");
+    }
+
+    // [HARDENING] Post-creation/existence verification (Anti-TOCTOU)
+    let metadata = fs::symlink_metadata(config_dir).context("Failed to read metadata of config dir")?;
+    if metadata.file_type().is_symlink() {
+        log::error!("SECURITY ALERT: Config directory is a symlink: {:?}", config_dir);
+        anyhow::bail!("Security Alert: Config directory is a symlink. This is prohibited.");
+    }
+
+    #[cfg(unix)]
+    {
+        let uid = unsafe { libc::getuid() };
+        if metadata.uid() != uid {
+            log::error!("SECURITY ALERT: Config directory owned by another user: UID {}", metadata.uid());
+            anyhow::bail!("Security Alert: Config directory ownership mismatch.");
         }
     }
+    
     Ok(())
 }
 
 pub fn load_raw_config(config_path: &Path) -> Result<Vec<u8>> {
     // [HARDENING] Verify path safety before reading
     if !crate::core::path_utils::is_safe_path(config_path) {
-        anyhow::bail!("Security Alert: Attempted to load config from an unsafe path: {:?}", config_path);
+        log::error!("SECURITY ALERT: Attempted to load config from unsafe path: {:?}", config_path);
+        anyhow::bail!("Security Alert: Attempted to load config from an unsafe path");
     }
 
     let mut file = fs::File::open(config_path).context("Failed to open config file")?;

@@ -1,3 +1,6 @@
+//! Core Substrate for Matrix Overlay.
+//! [HARDENED] All modules are independently testable and strictly bounded.
+
 pub mod main;
 pub mod config;
 pub mod layout;

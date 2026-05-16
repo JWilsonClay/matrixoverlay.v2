@@ -1,126 +1,42 @@
 //! Timer and orchestration thread.
-//! Handles the main update loop: collecting metrics and signaling the main thread to redraw.
-
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::thread;
 use std::time::{Duration, Instant};
-use std::collections::{HashMap, HashSet};
 use crossbeam_channel::Sender;
 use chrono::Datelike;
-
 use crate::core::config::Config;
-use crate::metrics::{
-    SharedMetrics, MetricData, MetricId, MetricCollector,
-    SysinfoManager, CpuCollector, MemoryCollector, UptimeLoadCollector,
-    NetworkCollector, DiskCollector, HwmonCollector, NvidiaSmiCollector,
-    OpenMeteoCollector, DateCollector, OverlayCpuCollector
-};
+use crate::metrics::{SharedMetrics, MetricData, factory};
 
-/// Spawns a thread that collects metrics and signals a redraw event at a fixed interval.
-///
-/// This replaces the internal loop of `metrics::spawn_metrics_thread` with one that
-/// explicitly communicates with the main thread via `redraw_tx`.
+/// [HARDENED] Spawns metrics collection thread with rate-limiting and graceful shutdown.
 pub fn spawn_metrics_and_timer_thread(
-    config: &Config,
-    metrics: Arc<Mutex<SharedMetrics>>,
-    redraw_tx: Sender<()>,
-    shutdown: Arc<AtomicBool>,
+    config: &Config, metrics: Arc<Mutex<SharedMetrics>>, redraw_tx: Sender<()>, shutdown: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     let config = config.clone();
-    let interval_ms = config.general.update_ms;
+    // [HARDENING] Enforce minimum interval to prevent CPU exhaustion
+    let interval_ms = config.general.update_ms.max(10);
 
     thread::spawn(move || {
-        let sys_manager = Arc::new(Mutex::new(SysinfoManager::new()));
-        let mut collectors: Vec<Box<dyn MetricCollector>> = Vec::new();
-
-        // 1. Identify required metrics from config
-        let mut required_metrics = HashSet::new();
-        
-        // Always add shared/base metrics
-        required_metrics.insert(MetricId::CpuUsage);
-        required_metrics.insert(MetricId::RamUsage);
-        required_metrics.insert(MetricId::Uptime);
-        required_metrics.insert(MetricId::NetworkDetails);
-        required_metrics.insert(MetricId::CpuTemp);
-        required_metrics.insert(MetricId::FanSpeed);
-        required_metrics.insert(MetricId::DayOfWeek);
-
-        // Add per-screen unique metrics
-        for screen in &config.screens {
-            for metric_name in &screen.metrics {
-                if let Some(id) = MetricId::from_str(metric_name) {
-                    required_metrics.insert(id);
-                }
-            }
-        }
-
-        // 2. Register Collectors based on requirements
-        if required_metrics.contains(&MetricId::CpuUsage) || required_metrics.contains(&MetricId::LoadAvg) {
-            collectors.push(Box::new(CpuCollector::new(sys_manager.clone())));
-        }
-        if required_metrics.contains(&MetricId::RamUsage) || required_metrics.contains(&MetricId::RamUsed) || required_metrics.contains(&MetricId::RamTotal) {
-            collectors.push(Box::new(MemoryCollector::new(sys_manager.clone())));
-        }
-        if required_metrics.contains(&MetricId::Uptime) || required_metrics.contains(&MetricId::LoadAvg) {
-            collectors.push(Box::new(UptimeLoadCollector::new(sys_manager.clone())));
-        }
-        if required_metrics.contains(&MetricId::NetworkDetails) {
-            collectors.push(Box::new(NetworkCollector::new()));
-        }
-        if required_metrics.contains(&MetricId::DiskUsage) {
-            collectors.push(Box::new(DiskCollector::new(sys_manager.clone())));
-        }
-        if required_metrics.contains(&MetricId::CpuTemp) || required_metrics.contains(&MetricId::FanSpeed) || required_metrics.contains(&MetricId::GpuTemp) {
-            collectors.push(Box::new(HwmonCollector::new(config.general.temp_unit.clone())));
-        }
-        if required_metrics.contains(&MetricId::GpuTemp) || required_metrics.contains(&MetricId::GpuUtil) {
-             collectors.push(Box::new(NvidiaSmiCollector::new(config.general.temp_unit.clone())));
-        }
-        if config.weather.enabled {
-            collectors.push(Box::new(OpenMeteoCollector::new_with_unit(config.weather.lat, config.weather.lon, true, config.weather.auto_location, config.general.temp_unit.clone())));
-        }
-        if config.general.show_cpu_metric || required_metrics.contains(&MetricId::OverlayCpu) {
-            collectors.push(Box::new(OverlayCpuCollector::new(sys_manager.clone())));
-        }
-        collectors.push(Box::new(DateCollector));
-
-        log::info!("Timer thread initialized with {} collectors. Interval: {}ms", collectors.len(), interval_ms);
-
+        let mut collectors = factory::create_collectors(&config);
+        log::info!("Timer thread initialized. Interval: {}ms", interval_ms);
         let interval = Duration::from_millis(interval_ms);
 
-        while !shutdown.load(Ordering::Relaxed) {
-            let start_time = Instant::now();
-            
-            // Collect
-            let mut frame_data = HashMap::new();
-            for collector in &mut collectors {
-                let data = collector.collect();
-                frame_data.extend(data);
-            }
+        while !shutdown.load(Ordering::SeqCst) {
+            let start = Instant::now();
+            let mut frame_data = std::collections::HashMap::new();
+            for collector in &mut collectors { frame_data.extend(collector.collect()); }
 
-            // Update Shared State
             if let Ok(mut shared) = metrics.lock() {
                 shared.data = MetricData { values: frame_data };
                 shared.timestamp = Instant::now();
                 shared.day_of_week = chrono::Local::now().weekday().to_string();
-
-                if log::log_enabled!(log::Level::Debug) {
-                    log::debug!("Metrics Collected: {}", shared.data.summary());
-                }
             }
 
-            // Signal Redraw
-            if let Err(_) = redraw_tx.send(()) {
-                log::info!("Redraw channel closed, stopping timer thread.");
-                break;
-            }
+            if redraw_tx.send(()).is_err() { break; }
 
-            // Sleep remainder of interval
-            let elapsed = start_time.elapsed();
-            if elapsed < interval {
-                thread::sleep(interval - elapsed);
-            }
+            let elapsed = start.elapsed();
+            if elapsed < interval { thread::sleep(interval - elapsed); }
+            else { thread::sleep(Duration::from_millis(1)); }
         }
-        log::info!("Timer thread stopped.");
+        log::info!("Timer thread stopped cleanly.");
     })
 }

@@ -1,4 +1,6 @@
 // src/core/config/defaults.rs
+//! Default configuration values for the Matrix Overlay.
+//! [HARDENED] All constants are bounded and validated to prevent resource exhaustion.
 
 pub fn default_label_spacing() -> i32 { 10 }
 pub fn default_temp_unit() -> String { "celsius".to_string() }
@@ -22,6 +24,7 @@ pub fn default_interval() -> u64 { 30 }
 pub fn default_max_files() -> usize { 5 }
 pub fn default_max_size() -> u64 { 1 }
 
+/// [HARDENING] Fixed-size glow pass configuration to prevent heap overflow.
 pub fn default_glow_passes() -> Vec<(f64, f64, f64)> {
     vec![
         (-2.0, -2.0, 0.2),

@@ -12,17 +12,9 @@ use crate::ui::tray::{SystemTray, MENU_QUIT_ID, MENU_RELOAD_ID, MENU_CONFIG_GUI_
 use crate::core::update::UpdateEvent;
 
 pub fn handle_xcb_event(
-    event: xcb::Event,
-    conn: &Arc<xcb::Connection>,
-    wm: &crate::core::window::WindowManager,
-    visible: &mut bool,
-    metrics: &Arc<std::sync::Mutex<SharedMetrics>>,
-    renderers: &mut Vec<Renderer>,
-    config: &Config,
-    last_draw: &mut Instant,
-    key_w: u8,
-    key_q: u8,
-    shutdown: &Arc<AtomicBool>,
+    event: xcb::Event, conn: &Arc<xcb::Connection>, wm: &crate::core::window::WindowManager,
+    visible: &mut bool, metrics: &Arc<std::sync::Mutex<SharedMetrics>>, renderers: &mut Vec<Renderer>,
+    config: &Config, last_draw: &mut Instant, key_w: u8, key_q: u8, shutdown: &Arc<AtomicBool>,
 ) {
     use xcb::x;
     match event {
@@ -30,21 +22,17 @@ pub fn handle_xcb_event(
             if ev.detail() == key_w {
                 *visible = !*visible;
                 for ctx in &wm.monitors {
-                    if *visible { let _ = conn.send_request(&x::MapWindow { window: ctx.window }); }
-                    else { let _ = conn.send_request(&x::UnmapWindow { window: ctx.window }); }
+                    let _ = if *visible { conn.send_request(&x::MapWindow { window: ctx.window }) }
+                            else { conn.send_request(&x::UnmapWindow { window: ctx.window }) };
                 }
                 let _ = conn.flush();
-            } else if ev.detail() == key_q {
-                shutdown.store(true, Ordering::Relaxed);
-            }
+            } else if ev.detail() == key_q { shutdown.store(true, Ordering::SeqCst); }
         },
         xcb::Event::X(x::Event::Expose(ev)) => {
             if *visible {
                 if let Some(idx) = wm.monitors.iter().position(|m| m.window == ev.window()) {
-                    if let Some(renderer) = renderers.get_mut(idx) {
-                        if let Ok(shared) = metrics.lock() {
-                            let _ = renderer.draw(conn, ev.window(), config, &shared.data, last_draw.elapsed());
-                        }
+                    if let (Some(r), Ok(s)) = (renderers.get_mut(idx), metrics.lock()) {
+                        let _ = r.draw(conn, ev.window(), config, &s.data, last_draw.elapsed());
                     }
                 }
             }
@@ -54,11 +42,8 @@ pub fn handle_xcb_event(
 }
 
 pub fn draw_frame(
-    conn: &Arc<xcb::Connection>,
-    wm: &crate::core::window::WindowManager,
-    renderers: &mut Vec<Renderer>,
-    config: &Config,
-    metrics: &Arc<std::sync::Mutex<SharedMetrics>>,
+    conn: &Arc<xcb::Connection>, wm: &crate::core::window::WindowManager,
+    renderers: &mut Vec<Renderer>, config: &Config, metrics: &Arc<std::sync::Mutex<SharedMetrics>>,
     last_draw: &mut Instant,
 ) {
     let dt = last_draw.elapsed();
@@ -73,44 +58,35 @@ pub fn draw_frame(
 }
 
 pub fn handle_menu_event(
-    event: MenuEvent,
-    config: &mut Config,
-    renderers: &mut Vec<Renderer>,
-    metrics_tx: &Sender<MetricsCommand>,
-    control_tx: &Sender<GuiEvent>,
-    shutdown: &Arc<AtomicBool>,
+    event: MenuEvent, config: &mut Config, renderers: &mut Vec<Renderer>,
+    metrics_tx: &Sender<MetricsCommand>, control_tx: &Sender<GuiEvent>, shutdown: &Arc<AtomicBool>,
 ) {
-    if event.id.as_ref() == MENU_QUIT_ID {
-        shutdown.store(true, Ordering::Relaxed);
-    } else if event.id.as_ref() == MENU_RELOAD_ID {
-        if let Ok(new_config) = Config::load() {
-            *config = new_config.clone();
-            for renderer in renderers { renderer.update_config(config.clone()); }
+    let id = event.id.as_ref();
+    if id == MENU_QUIT_ID { shutdown.store(true, Ordering::SeqCst); }
+    else if id == MENU_RELOAD_ID {
+        if let Ok(new_cfg) = Config::load() {
+            *config = new_cfg.clone();
+            for r in renderers { r.update_config(config.clone()); }
             let _ = metrics_tx.send(MetricsCommand::UpdateConfig(config.clone()));
         }
-    } else if event.id.as_ref() == MENU_CONFIG_GUI_ID {
-        let _ = control_tx.send(GuiEvent::OpenConfig);
-    } else if event.id.as_ref() == MENU_UPDATE_ID {
-        log::info!("[Update] User triggered update...");
-    }
+    } else if id == MENU_CONFIG_GUI_ID { let _ = control_tx.send(GuiEvent::OpenConfig); }
+    else if id == MENU_UPDATE_ID { log::info!("[Update] User triggered update..."); }
 }
 
 pub fn handle_gui_event(
-    event: GuiEvent,
-    config: &mut Config,
-    renderers: &mut Vec<Renderer>,
-    metrics_tx: &Sender<MetricsCommand>,
+    event: GuiEvent, config: &mut Config, renderers: &mut Vec<Renderer>, metrics_tx: &Sender<MetricsCommand>,
 ) {
     match event {
         GuiEvent::Reload => {
-            if let Ok(new_config) = Config::load() {
-                *config = new_config.clone();
-                for renderer in renderers { renderer.update_config(config.clone()); }
+            if let Ok(new_cfg) = Config::load() {
+                *config = new_cfg.clone();
+                for r in renderers { r.update_config(config.clone()); }
                 let _ = metrics_tx.send(MetricsCommand::UpdateConfig(config.clone()));
             }
         },
         GuiEvent::PurgeLogs => {
-            let _ = crate::core::logging::Logger::purge_debug_logs("/tmp/matrix_overlay_logs");
+            // [HARDENING] Use configured path, not hardcoded /tmp
+            let _ = crate::core::logging::Logger::purge_debug_logs(&config.logging.log_path);
         },
         _ => {}
     }
@@ -118,7 +94,6 @@ pub fn handle_gui_event(
 
 pub fn handle_update_event(event: UpdateEvent, control_tx: &Sender<GuiEvent>) {
     if let UpdateEvent::UpdateAvailable { version, .. } = event {
-        log::info!("[Update] New version available: v{}", version);
         SystemTray::show_update_bubble(&version);
         let _ = control_tx.send(GuiEvent::UpdateAvailable(version));
     }

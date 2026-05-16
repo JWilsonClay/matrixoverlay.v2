@@ -65,22 +65,19 @@ pub fn spawn_overlay_thread(
 
         let mut renderers = Vec::new();
         for (i, _) in wm.monitors.iter().enumerate() {
-            let layout = layout::compute(&current_config, i, 1920, 1080);
-            if let Ok(renderer) = Renderer::new(1920, 1080, i, layout, &current_config) {
-                renderers.push(renderer);
-            }
+            let layout = crate::core::layout::compute(&current_config, i, 1920, 1080);
+            if let Ok(r) = Renderer::new(1920, 1080, i, layout, &current_config) { renderers.push(r); }
         }
         
         let (tick_tx, tick_rx) = bounded(1);
-        spawn_tick_thread(tick_tx);
+        spawn_tick_thread(tick_tx, Arc::clone(&shutdown));
 
         let key_w = find_keycode(&conn, 0x0077).unwrap_or(Some(0)).unwrap_or(0);
         let key_q = find_keycode(&conn, 0x0071).unwrap_or(Some(0)).unwrap_or(0);
-        let mut visible = true;
-        let mut last_draw = Instant::now();
+        let (mut visible, mut last_draw) = (true, Instant::now());
 
         loop {
-            if shutdown.load(Ordering::Relaxed) { break; }
+            if shutdown.load(Ordering::SeqCst) { break; }
             select! {
                 recv(xcb_rx) -> res => if let Ok(ev) = res { handle_xcb_event(ev, &conn, &wm, &mut visible, &metrics, &mut renderers, &current_config, &mut last_draw, key_w, key_q, &shutdown); },
                 recv(tick_rx) -> _ => if visible { draw_frame(&conn, &wm, &mut renderers, &current_config, &metrics, &mut last_draw); },
@@ -93,10 +90,10 @@ pub fn spawn_overlay_thread(
     });
 }
 
-fn spawn_tick_thread(tx: Sender<()>) {
+fn spawn_tick_thread(tx: Sender<()>, shutdown: Arc<AtomicBool>) {
     thread::spawn(move || {
         let interval = Duration::from_millis(33); 
-        loop {
+        while !shutdown.load(Ordering::SeqCst) {
             let start = Instant::now();
             if tx.send(()).is_err() { break; }
             let elapsed = start.elapsed();
