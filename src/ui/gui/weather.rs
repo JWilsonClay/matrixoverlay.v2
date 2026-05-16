@@ -1,8 +1,11 @@
-// src/ui/gui/weather.rs
+//! Weather Configuration GUI Substrate.
+//! Orchestrates location parameters and automated Geo-IP discovery.
+
 use gtk::prelude::*;
 use gtk::{Box, Label, SpinButton, CheckButton};
 use crate::core::config::Config;
 
+/// [HARDENED] Builds the weather configuration view with strictly bounded inputs.
 pub fn build(vbox: &Box, config: &Config) -> (CheckButton, CheckButton, SpinButton, SpinButton) {
     vbox.set_border_width(10);
 
@@ -14,17 +17,17 @@ pub fn build(vbox: &Box, config: &Config) -> (CheckButton, CheckButton, SpinButt
     check_auto_loc.set_active(config.weather.auto_location);
     vbox.pack_start(&check_auto_loc, false, false, 0);
 
-    vbox.pack_start(&Label::new(Some("Manual Latitude")), false, false, 0);
+    vbox.pack_start(&Label::new(Some("Manual Latitude")), false, false, 5);
     let lat_spin = SpinButton::with_range(-90.0, 90.0, 0.0001);
     lat_spin.set_value(config.weather.lat);
     vbox.pack_start(&lat_spin, false, false, 0);
 
-    vbox.pack_start(&Label::new(Some("Manual Longitude")), false, false, 0);
+    vbox.pack_start(&Label::new(Some("Manual Longitude")), false, false, 5);
     let lon_spin = SpinButton::with_range(-180.0, 180.0, 0.0001);
     lon_spin.set_value(config.weather.lon);
     vbox.pack_start(&lon_spin, false, false, 0);
 
-    // Setup sensitivity logic
+    // [HARDENING] Interactive sensitivity logic
     let cal = check_auto_loc.clone();
     let ls = lat_spin.clone();
     let lns = lon_spin.clone();
@@ -57,6 +60,7 @@ pub fn build(vbox: &Box, config: &Config) -> (CheckButton, CheckButton, SpinButt
                 gtk::glib::Continue(false)
             });
 
+            // [SECURITY] Failure-isolated Geo-IP discovery
             std::thread::spawn(move || {
                 if let Ok((lat, lon)) = crate::metrics::fetch_geoip_location() {
                      let _ = tx.send((lat, lon));
