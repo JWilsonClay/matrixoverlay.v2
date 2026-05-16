@@ -43,6 +43,7 @@ impl Default for Config {
                 label_value_spacing: 10,
                 show_cpu_metric: false,
                 temp_unit: "celsius".to_string(),
+                header_font_size: default_header_font_size(),
             },
             screens: vec![Screen {
                 metrics: vec!["cpu_usage".to_string(), "ram_usage".to_string(), "disk_usage".to_string(), "network_details".to_string(), "cpu_temp".to_string(), "gpu_temp".to_string()],

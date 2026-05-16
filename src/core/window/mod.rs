@@ -6,6 +6,7 @@ pub mod shape;
 pub mod creation;
 
 use xcb::x;
+use xcb::Xid;
 use anyhow::{Result, Context};
 use crate::core::config::{Config, Screen};
 
@@ -27,15 +28,50 @@ impl WindowManager {
     }
 }
 
-/// [HARDENED] Orchestrates window creation with rollback on partial failure.
+pub struct MonitorInfo { pub x: i16, pub y: i16, pub width: u16, pub height: u16, pub name: String }
+
+/// [HARDENED] Orchestrates window creation with hardware-aware auto-detection.
 pub fn create_all_windows(conn: &xcb::Connection, config: &Config) -> Result<WindowManager> {
     let atoms = atoms::Atoms::new(conn)?;
     let mut monitors = Vec::new();
 
-    for screen in &config.screens {
-        // [HARDENING] Use config-defined geometry for each screen
-        match creation::create_window(conn, 0, &atoms, config, 1920, 1080, 0, 0) {
-            Ok(window) => monitors.push(MonitorContext { window, screen: screen.clone() }),
+    // [HARDENING] Query physical monitor layout via RandR
+    let setup = conn.get_setup();
+    let screen = setup.roots().next().context("No X11 screen found")?;
+    
+    // Query RandR for active screens
+    let randr_cookie = conn.send_request(&xcb::randr::GetScreenResources { window: screen.root() });
+    let randr_reply = conn.wait_for_reply(randr_cookie)?;
+    
+    let mut physical_monitors = Vec::new();
+    for &output in randr_reply.outputs() {
+        let output_cookie = conn.send_request(&xcb::randr::GetOutputInfo { output, config_timestamp: randr_reply.config_timestamp() });
+        if let Ok(output_info) = conn.wait_for_reply(output_cookie) {
+            if output_info.connection() == xcb::randr::Connection::Connected && output_info.crtc() != xcb::randr::Crtc::none() {
+                let crtc_cookie = conn.send_request(&xcb::randr::GetCrtcInfo { crtc: output_info.crtc(), config_timestamp: randr_reply.config_timestamp() });
+                if let Ok(crtc_info) = conn.wait_for_reply(crtc_cookie) {
+                    physical_monitors.push(MonitorInfo {
+                        x: crtc_info.x(), y: crtc_info.y(),
+                        width: crtc_info.width(), height: crtc_info.height(),
+                        name: String::from_utf8_lossy(output_info.name()).to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    // Fallback to config if RandR fails or returns nothing
+    if physical_monitors.is_empty() {
+        log::warn!("RandR discovery returned 0 monitors. Falling back to primary screen.");
+        physical_monitors.push(MonitorInfo { x: 0, y: 0, width: 1920, height: 1080, name: "Fallback".to_string() });
+    }
+
+    for (i, info) in physical_monitors.iter().enumerate() {
+        log::info!("[HUD] Deploying to monitor {}: {} ({}x{} at {},{})", i, info.name, info.width, info.height, info.x, info.y);
+        let screen_cfg = config.screens.get(i).cloned().unwrap_or_else(|| config.screens[0].clone());
+        
+        match creation::create_window(conn, 0, &atoms, config, info.width, info.height, info.x, info.y) {
+            Ok(window) => monitors.push(MonitorContext { window, screen: screen_cfg }),
             Err(e) => {
                 let _ = WindowManager { monitors }.cleanup(conn);
                 return Err(e).context("Failed to create all windows");

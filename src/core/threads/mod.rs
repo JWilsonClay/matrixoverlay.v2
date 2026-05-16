@@ -55,6 +55,7 @@ pub fn spawn_overlay_thread(
     gui_rx: Receiver<GuiEvent>,
     control_tx: Sender<GuiEvent>,
     update_rx: Receiver<UpdateEvent>,
+    update_manager: Arc<crate::core::update::UpdateManager>,
 ) {
     thread::spawn(move || {
         let mut current_config = config.clone();
@@ -64,9 +65,17 @@ pub fn spawn_overlay_thread(
         };
 
         let mut renderers = Vec::new();
-        for (i, _) in wm.monitors.iter().enumerate() {
-            let layout = crate::core::layout::compute(&current_config, i, 1920, 1080);
-            if let Ok(r) = Renderer::new(1920, 1080, i, layout, &current_config) { renderers.push(r); }
+        for (i, ctx) in wm.monitors.iter().enumerate() {
+            // [HARDENING] Retrieve physical geometry from the monitor context
+            let cookie = conn.send_request(&xcb::x::GetGeometry { drawable: xcb::x::Drawable::Window(ctx.window) });
+            if let Ok(geom) = conn.wait_for_reply(cookie) {
+                let w = geom.width();
+                let h = geom.height();
+                let layout = crate::core::layout::compute(&current_config, i, w, h);
+                if let Ok(r) = Renderer::new(w, h, i, layout, &current_config) {
+                    renderers.push(r);
+                }
+            }
         }
         
         let (tick_tx, tick_rx) = bounded(1);
@@ -75,15 +84,27 @@ pub fn spawn_overlay_thread(
         let key_w = find_keycode(&conn, 0x0077).unwrap_or(Some(0)).unwrap_or(0);
         let key_q = find_keycode(&conn, 0x0071).unwrap_or(Some(0)).unwrap_or(0);
         let (mut visible, mut last_draw) = (true, Instant::now());
+        
+        // [HARDENING] Ensure windows are mapped on startup and pushed to the absolute bottom
+        for ctx in &wm.monitors {
+            let _ = conn.send_request(&xcb::x::MapWindow { window: ctx.window });
+            let _ = conn.send_request(&xcb::x::ConfigureWindow {
+                window: ctx.window,
+                value_list: &[xcb::x::ConfigWindow::StackMode(xcb::x::StackMode::Below)],
+            });
+        }
+        let _ = conn.flush();
+        
+        let mut latest_version: Option<String> = None;
 
         loop {
             if shutdown.load(Ordering::SeqCst) { break; }
             select! {
                 recv(xcb_rx) -> res => if let Ok(ev) = res { handle_xcb_event(ev, &conn, &wm, &mut visible, &metrics, &mut renderers, &current_config, &mut last_draw, key_w, key_q, &shutdown); },
                 recv(tick_rx) -> _ => if visible { draw_frame(&conn, &wm, &mut renderers, &current_config, &metrics, &mut last_draw); },
-                recv(MenuEvent::receiver()) -> res => if let Ok(ev) = res { handle_menu_event(ev, &mut current_config, &mut renderers, &metrics_tx, &control_tx, &shutdown); },
+                recv(MenuEvent::receiver()) -> res => if let Ok(ev) = res { handle_menu_event(ev, &mut current_config, &mut renderers, &metrics_tx, &control_tx, &shutdown, &update_manager, &mut latest_version); },
                 recv(gui_rx) -> res => if let Ok(ev) = res { handle_gui_event(ev, &mut current_config, &mut renderers, &metrics_tx); },
-                recv(update_rx) -> res => if let Ok(ev) = res { handle_update_event(ev, &control_tx); }
+                recv(update_rx) -> res => if let Ok(ev) = res { handle_update_event(ev, &control_tx, &mut latest_version); }
             }
         }
         let _ = wm.cleanup(&conn);

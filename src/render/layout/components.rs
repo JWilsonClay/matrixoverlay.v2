@@ -13,7 +13,7 @@ pub fn draw_day_of_week(cr: &CairoContext, text: &str, x: f64, y: f64, w: f64, h
     cr.save()?;
     let layout = pangocairo::functions::create_layout(cr);
     let mut desc = pango::FontDescription::from_string("Monospace");
-    desc.set_size((config.general.font_size as f64 * 1.8 * pango::SCALE as f64) as i32);
+    desc.set_size((config.general.header_font_size as f64 * pango::SCALE as f64) as i32);
     desc.set_weight(Weight::Bold);
     layout.set_font_description(Some(&desc));
     layout.set_text(text);

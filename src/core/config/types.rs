@@ -8,6 +8,8 @@ pub struct General {
     pub font_size: u32,
     #[serde(default = "default_metric_font_size")]
     pub metric_font_size: u32,
+    #[serde(default = "default_header_font_size")]
+    pub header_font_size: u32,
     pub color: String,
     pub update_ms: u64,
     #[serde(default = "default_theme")]

@@ -32,7 +32,7 @@ pub fn create_window(
     let values = [
         x::Cw::BackPixel(0),
         x::Cw::BorderPixel(0),
-        x::Cw::OverrideRedirect(true),
+        x::Cw::OverrideRedirect(false),
         x::Cw::EventMask(x::EventMask::EXPOSURE | x::EventMask::KEY_PRESS | x::EventMask::STRUCTURE_NOTIFY),
         x::Cw::Colormap(colormap),
     ];
@@ -59,6 +59,12 @@ pub fn create_window(
 
     // Apply click-through shape
     crate::core::window::shape::apply_click_through(conn, window)?;
+
+    // [HARDENING] Force window to the absolute bottom of the stack
+    conn.send_request(&x::ConfigureWindow {
+        window,
+        value_list: &[x::ConfigWindow::StackMode(x::StackMode::Below)],
+    });
 
     Ok(window)
 }

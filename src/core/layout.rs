@@ -30,6 +30,18 @@ pub fn compute(config: &Config, screen_index: usize, width: u16, _height: u16) -
     let safe_top = 180; // Desktop icon/header safety
     let start_y = std::cmp::max(top_margin, safe_top);
     
+    // [HARDENING] Sovereign Top-Center Day of Week
+    items.push(LayoutItem {
+        metric_id: "day_of_week".to_string(),
+        label: "".to_string(),
+        x: (width as i32 / 2) - 100,
+        y: top_margin + 20,
+        label_value_spacing: 0,
+        max_width: 600,
+        alignment: "center".to_string(),
+        clip: false,
+    });
+    
     let line_height = config.general.metric_spacing;
     let columns = std::cmp::max(1, config.general.metric_columns);
     

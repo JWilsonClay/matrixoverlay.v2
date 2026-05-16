@@ -60,17 +60,48 @@ pub fn draw_frame(
 pub fn handle_menu_event(
     event: MenuEvent, config: &mut Config, renderers: &mut Vec<Renderer>,
     metrics_tx: &Sender<MetricsCommand>, control_tx: &Sender<GuiEvent>, shutdown: &Arc<AtomicBool>,
+    update_manager: &Arc<crate::core::update::UpdateManager>, latest_version: &mut Option<String>,
 ) {
     let id = event.id.as_ref();
     if id == MENU_QUIT_ID { shutdown.store(true, Ordering::SeqCst); }
     else if id == MENU_RELOAD_ID {
-        if let Ok(new_cfg) = Config::load() {
-            *config = new_cfg.clone();
-            for r in renderers { r.update_config(config.clone()); }
-            let _ = metrics_tx.send(MetricsCommand::UpdateConfig(config.clone()));
+        match Config::load() {
+            Ok(new_cfg) => {
+                *config = new_cfg.clone();
+                let geometries: Vec<(u16, u16, usize)> = renderers.iter()
+                    .map(|r| (r.width as u16, r.height as u16, r.monitor_index))
+                    .collect();
+                
+                renderers.clear();
+                for (w, h, idx) in geometries {
+                    let layout = crate::core::layout::compute(config, idx, w, h);
+                    match Renderer::new(w, h, idx, layout, config) {
+                        Ok(r) => renderers.push(r),
+                        Err(e) => {
+                            log::error!("[HUD] Renderer init failed for monitor {}: {}", idx, e);
+                            crate::ui::tray::SystemTray::show_error_bubble("Initialization Failed", &format!("Monitor {}: {}", idx, e));
+                        }
+                    }
+                }
+                let _ = metrics_tx.send(MetricsCommand::UpdateConfig(config.clone()));
+                log::info!("[HUD] Geometry-aware structural reload complete.");
+            },
+            Err(e) => {
+                log::error!("[HUD] Reload failed: {}", e);
+                crate::ui::tray::SystemTray::show_error_bubble("Reload Failed", &format!("Config error: {}", e));
+            }
         }
     } else if id == MENU_CONFIG_GUI_ID { let _ = control_tx.send(GuiEvent::OpenConfig); }
-    else if id == MENU_UPDATE_ID { log::info!("[Update] User triggered update..."); }
+    else if id == MENU_UPDATE_ID { 
+        log::info!("[Update] User triggered secure delivery...");
+        if let Some(version) = latest_version {
+            if let Err(e) = update_manager.execute_update(version) {
+                log::error!("Secure Delivery Failed: {}", e);
+            }
+        } else {
+            log::warn!("Update requested but no version gap detected.");
+        }
+    }
 }
 
 pub fn handle_gui_event(
@@ -80,8 +111,20 @@ pub fn handle_gui_event(
         GuiEvent::Reload => {
             if let Ok(new_cfg) = Config::load() {
                 *config = new_cfg.clone();
-                for r in renderers { r.update_config(config.clone()); }
+                let geometries: Vec<(u16, u16, usize)> = renderers.iter()
+                    .map(|r| (r.width as u16, r.height as u16, r.monitor_index))
+                    .collect();
+                
+                renderers.clear();
+                for (w, h, idx) in geometries {
+                    let layout = crate::core::layout::compute(config, idx, w, h);
+                    match Renderer::new(w, h, idx, layout, config) {
+                        Ok(r) => renderers.push(r),
+                        Err(e) => log::error!("[GUI] Reload failed for monitor {}: {}", idx, e),
+                    }
+                }
                 let _ = metrics_tx.send(MetricsCommand::UpdateConfig(config.clone()));
+                log::info!("[HUD] GUI-triggered structural reload complete.");
             }
         },
         GuiEvent::PurgeLogs => {
@@ -92,8 +135,9 @@ pub fn handle_gui_event(
     }
 }
 
-pub fn handle_update_event(event: UpdateEvent, control_tx: &Sender<GuiEvent>) {
+pub fn handle_update_event(event: UpdateEvent, control_tx: &Sender<GuiEvent>, latest_version: &mut Option<String>) {
     if let UpdateEvent::UpdateAvailable { version, .. } = event {
+        *latest_version = Some(version.clone());
         SystemTray::show_update_bubble(&version);
         let _ = control_tx.send(GuiEvent::UpdateAvailable(version));
     }

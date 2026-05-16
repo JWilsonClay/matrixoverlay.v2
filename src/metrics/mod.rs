@@ -72,7 +72,7 @@ impl MetricId {
             Self::CpuTemp => "CPU Temp", Self::FanSpeed => "Fan",
             Self::GpuTemp => "GPU Temp", Self::GpuUtil => "GPU Util",
             Self::WeatherTemp => "Weather", Self::WeatherCondition => "Cond",
-            Self::DayOfWeek => "Day", Self::CodeDelta => "Git",
+            Self::DayOfWeek => "", Self::CodeDelta => "Git",
             Self::OverlayCpu => "HUD CPU", Self::LocationData => "Loc",
             Self::Custom(_) => "Metric",
         }

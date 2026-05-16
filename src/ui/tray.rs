@@ -57,6 +57,14 @@ impl SystemTray {
             .body(&format!("A new version (v{}) is ready for secure delivery.", version))
             .icon("system-software-update").timeout(10000).show();
     }
+
+    /// [HARDENED] Error notification for diagnostic visibility.
+    pub fn show_error_bubble(summary: &str, body: &str) {
+        let _ = Notification::new()
+            .summary(&format!("Matrix Overlay - {}", summary))
+            .body(body)
+            .icon("dialog-error").timeout(10000).show();
+    }
 }
 
 fn generate_icon() -> Result<Icon> {

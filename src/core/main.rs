@@ -49,10 +49,12 @@ pub fn run() -> Result<()> {
     let (update_tx, update_rx) = unbounded::<UpdateEvent>();
 
     // 7. Initialize Update Manager
-    let update_manager = UpdateManager::new("JWilsonClay", "matrixoverlay.v2", update_tx);
-    let _update_handle = update_manager.spawn_checker(24, Arc::clone(&shutdown));
+    let update_manager = Arc::new(UpdateManager::new("JWilsonClay", "matrixoverlay.v2", update_tx));
+    let _update_handle = (*update_manager).clone().spawn_checker(24, Arc::clone(&shutdown));
     
     // 8. Spawn Core Threads
+    let _tray = crate::ui::tray::SystemTray::new(&config)?;
+    
     threads::spawn_xcb_thread(Arc::clone(&conn), xcb_tx);
     threads::spawn_productivity_thread(config.clone(), Arc::clone(&shutdown));
     
@@ -66,6 +68,7 @@ pub fn run() -> Result<()> {
         gui_rx,
         control_tx.clone(),
         update_rx,
+        update_manager,
     );
 
     // 9. Main GUI Loop (GTK)

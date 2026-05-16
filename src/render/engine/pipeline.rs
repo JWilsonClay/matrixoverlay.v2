@@ -43,8 +43,14 @@ impl Renderer {
             if let Some(id) = MetricId::from_str(&item.metric_id) {
                 if let Some(v) = metrics.values.get(&id) {
                     let v_s = layout::format_metric_value(v);
-                    let lbl = if item.label.is_empty() { id.label() } else { item.label.as_str() };
-                    if let Ok(Some(el)) = layout::draw_metric_pair(cr, &lbl, &v_s, item.x as f64, item.y as f64, item.max_width as f64, &item.metric_id, true, &config.general.glow_passes, config, item, self.color_rgb, &mut self.scroll.borrow_mut()) {
+                    let res = if item.metric_id == "day_of_week" {
+                        layout::draw_day_of_week(cr, &v_s, item.x as f64, item.y as f64, 200.0, 50.0, &config.general.glow_passes, config, self.color_rgb)
+                    } else {
+                        let lbl = if item.label.is_empty() { id.label() } else { item.label.as_str() };
+                        layout::draw_metric_pair(cr, &lbl, &v_s, item.x as f64, item.y as f64, item.max_width as f64, &item.metric_id, true, &config.general.glow_passes, config, item, self.color_rgb, &mut self.scroll.borrow_mut())
+                    };
+
+                    if let Ok(Some(el)) = res {
                         self.visual_elements.borrow_mut().push(el);
                     }
                 }

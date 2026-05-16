@@ -12,6 +12,7 @@ pub enum UpdateEvent {
     UpdateStarted, UpdateProgress(f32), UpdateFinished, UpdateError(String),
 }
 
+#[derive(Clone)]
 pub struct UpdateManager {
     owner: String, name: String, event_tx: Sender<UpdateEvent>,
 }
@@ -28,7 +29,9 @@ impl UpdateManager {
             .bin_name("matrix-overlay").current_version(cargo_crate_version!())
             .build()?.get_latest_release()?;
 
+        log::info!("Latest remote version: {}", rel.version);
         if self_update::version::bump_is_greater(cargo_crate_version!(), &rel.version)? {
+            log::info!("Update signal emitted for v{}", rel.version);
             let _ = self.event_tx.send(UpdateEvent::UpdateAvailable {
                 version: rel.version, body: rel.body.unwrap_or_default(),
             });

@@ -16,6 +16,12 @@ impl RainManager {
     pub fn new(realism: u32) -> Self { Self { streams: Vec::new(), realism, last_w: 0, last_h: 0 } }
 
     pub fn update(&mut self, dt: Duration, w: i32, h: i32, config: &Config) {
+        // [HARDENING] Synchronize physics substrate with live config
+        if config.cosmetics.realism != self.realism {
+            self.realism = config.cosmetics.realism;
+            self.reset(w, h);
+        }
+        
         if self.streams.is_empty() || w != self.last_w || h != self.last_h { self.reset(w, h); }
         let dy = 60.0 * dt.as_secs_f64() * config.cosmetics.rain_speed;
         if dy.is_nan() || dy.is_infinite() { return; }

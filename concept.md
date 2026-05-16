@@ -1,12 +1,12 @@
-# Matrix Overlay v2: Sovereign Intent & Concept
+# Matrix Overlay v2: Intent & Concept
 
 ## I. Mission Statement
 **Matrix Overlay v2** is a high-performance, low-resource desktop transparency substrate for Linux (Pop!_OS). It blends immersive **Matrix-themed aesthetics** with **forensic productivity tracking** to provide developers with a real-time pulse of their system and their output.
 
 ---
 
-## II. Core Concept: The Sovereign HUD
-The application functions as a "Heads-Up Display" (HUD) for the modern developer. It is not merely a monitor; it is a **Sovereign Substrate** where every functional domain is physically decoupled and architecturally hardened.
+## II. Core Concept: The HUD
+The application functions as a "Heads-Up Display" (HUD) for the modern developer. It is not merely a monitor; it is a **Substrate** where every functional domain is physically decoupled and architecturally hardened.
 
 ### 1. Aesthetic Vision (The Matrix)
 - **Realism-Scale Rain**: Katakana glyphs falling with proportional speeds based on apparent Z-depth (size/brightness/speed correlation).
@@ -26,9 +26,9 @@ The application functions as a "Heads-Up Display" (HUD) for the modern developer
 ---
 
 ## III. Architectural Governance
-The project adheres to the **Sovereign AI Engineering** standards:
+The project adheres to **AI Engineering** standards:
 - **Decoupled Domains**: Metrics, Rendering, GUI, and Logic are isolated into independent modules.
-- **Sovereign Line Limits**:
+- **Line Limits**:
     - **125 Lines**: Target for all "Skeleton" and new functional modules to ensure decomposition.
     - **175 Lines**: Maximum limit for "Hardened" modules to accommodate copious documentation and validation logic.
 - **Zero-Trust Input**: Every GUI parameter and configuration value is strictly bounded and sanitized before entering the rendering pipeline.

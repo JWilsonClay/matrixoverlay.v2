@@ -5,6 +5,7 @@
 pub fn default_label_spacing() -> i32 { 10 }
 pub fn default_temp_unit() -> String { "celsius".to_string() }
 pub fn default_metric_font_size() -> u32 { 14 }
+pub fn default_header_font_size() -> u32 { 32 }
 pub fn default_spacing() -> i32 { 24 }
 pub fn default_columns() -> u32 { 1 }
 pub fn default_alignment() -> String { "left".to_string() }
