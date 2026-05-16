@@ -1,7 +1,10 @@
 //! X11 Atom management for Sovereign Windowing.
+//! Provides cached atom identifiers for EWMH and WM communication.
+
 use xcb::x;
 use anyhow::{Context, Result};
 
+/// [HARDENED] Cached X11 atoms for protocol compliance.
 pub struct Atoms {
     pub wm_protocols: x::Atom,
     pub wm_delete_window: x::Atom,
@@ -33,6 +36,7 @@ impl Atoms {
     }
 }
 
+/// [HARDENED] Deterministic atom interning.
 fn get_atom(conn: &xcb::Connection, name: &str) -> Result<x::Atom> {
     let cookie = conn.send_request(&x::InternAtom { only_if_exists: false, name: name.as_bytes() });
     let reply = conn.wait_for_reply(cookie).context(format!("Atom fail: {}", name))?;
