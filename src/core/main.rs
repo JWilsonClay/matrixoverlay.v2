@@ -17,6 +17,7 @@ pub fn run() -> Result<()> {
     
     // 2. Init Substrate
     init::init_logging(&config)?;
+    gtk::init().context("Failed to initialize GTK")?;
     log::info!("Sovereign Substrate Initialized. v0.1.3-SOC");
 
     // [HARDENING] Verify DISPLAY for X11 environments
