@@ -1,8 +1,11 @@
-// src/ui/gui/cosmetics.rs
+//! Cosmetic Configuration GUI Substrate.
+//! Manages visual parameters for the rain simulation and HUD overlays.
+
 use gtk::prelude::*;
 use gtk::{Box, Label, SpinButton, CheckButton};
 use crate::core::config::Config;
 
+/// [HARDENED] Builds the cosmetics configuration view with strictly bounded inputs.
 pub fn build(vbox: &Box, config: &Config) -> (SpinButton, SpinButton, SpinButton, SpinButton, SpinButton, CheckButton, CheckButton) {
     vbox.set_border_width(10);
 
@@ -33,7 +36,7 @@ pub fn build(vbox: &Box, config: &Config) -> (SpinButton, SpinButton, SpinButton
 
     let check_occlusion = CheckButton::with_label("Enable Occlusion (Rain behind metrics)");
     check_occlusion.set_active(config.cosmetics.occlusion_enabled);
-    vbox.pack_start(&check_occlusion, false, false, 0);
+    vbox.pack_start(&check_occlusion, false, false, 10);
 
     let check_border = CheckButton::with_label("Metric HUD Borders");
     check_border.set_active(config.cosmetics.border_enabled);

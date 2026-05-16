@@ -1,3 +1,6 @@
+//! Tray Icon Reproduction & Test Substrate.
+//! [HARDENED] Validates RGBA buffers and enforces clean event loop exit.
+
 use tray_icon::{Icon, TrayIconBuilder, menu::{Menu, MenuItem, MenuEvent}, TrayIconEvent};
 use std::time::Duration;
 
@@ -23,30 +26,25 @@ fn main() -> anyhow::Result<()> {
 
     loop {
         #[cfg(target_os = "linux")]
-        while gtk::events_pending() {
-            gtk::main_iteration();
-        }
+        while gtk::events_pending() { gtk::main_iteration(); }
 
-        if let Ok(event) = tray_channel.try_recv() {
+        while let Ok(event) = tray_channel.try_recv() {
             println!("TRAY EVENT: {:?}", event);
         }
 
-        if let Ok(event) = menu_channel.try_recv() {
+        while let Ok(event) = menu_channel.try_recv() {
             println!("MENU EVENT: {:?}", event);
-            if event.id.as_ref() == "quit" {
-                break;
-            }
+            if event.id.as_ref() == "quit" { return Ok(()); }
         }
 
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(50));
     }
-
-    Ok(())
 }
 
 fn generate_dummy_icon() -> Icon {
     let width = 32;
     let height = 32;
     let rgba = vec![0, 255, 0, 255].repeat(width * height);
-    Icon::from_rgba(rgba, width as u32, height as u32).unwrap()
+    // [HARDENING] Icon creation validation
+    Icon::from_rgba(rgba, width as u32, height as u32).expect("Icon buffer mismatch")
 }

@@ -1,8 +1,11 @@
-// src/ui/gui/general.rs
+//! General Configuration GUI Substrate.
+//! Orchestrates theme, typography, and update interval parameters.
+
 use gtk::prelude::*;
-use gtk::{Box, Orientation, Label, ComboBoxText, SpinButton, CheckButton};
+use gtk::{Box, Label, ComboBoxText, SpinButton, CheckButton};
 use crate::core::config::Config;
 
+/// [HARDENED] Builds the general configuration view with strictly bounded inputs.
 pub fn build(vbox: &Box, config: &Config) -> (ComboBoxText, SpinButton, SpinButton, SpinButton, SpinButton, SpinButton, ComboBoxText, SpinButton, CheckButton, CheckButton, ComboBoxText) {
     vbox.set_border_width(10);
     
@@ -54,7 +57,7 @@ pub fn build(vbox: &Box, config: &Config) -> (ComboBoxText, SpinButton, SpinButt
 
     let check_monitor_label = CheckButton::with_label("Show Monitor Labels (e.g., Monitor 1)");
     check_monitor_label.set_active(config.general.show_monitor_label);
-    vbox.pack_start(&check_monitor_label, false, false, 0);
+    vbox.pack_start(&check_monitor_label, false, false, 10);
 
     let check_cpu_metric = CheckButton::with_label("Show Overlay CPU Usage (Internal)");
     check_cpu_metric.set_active(config.general.show_cpu_metric);

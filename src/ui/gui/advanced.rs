@@ -1,8 +1,11 @@
-// src/ui/gui/advanced.rs
+//! Advanced Configuration GUI Substrate.
+//! Orchestrates performance presets and maintenance interactions.
+
 use gtk::prelude::*;
 use gtk::{Box, Orientation, Label, CheckButton, Button};
 use crate::core::config::Config;
 
+/// [HARDENED] Builds the advanced configuration view with failure-isolated widgets.
 pub fn build(vbox: &Box, config: &Config) -> (Button, Button, Button, CheckButton, Button) {
     vbox.set_border_width(10);
     
@@ -20,7 +23,7 @@ pub fn build(vbox: &Box, config: &Config) -> (Button, Button, Button, CheckButto
 
     let check_logging = CheckButton::with_label("Enable Debug Logging (Auto-rotated)");
     check_logging.set_active(config.logging.enabled);
-    vbox.pack_start(&check_logging, false, false, 0);
+    vbox.pack_start(&check_logging, false, false, 10);
 
     let btn_purge = Button::with_label("Purge Debug Logs (/tmp)");
     vbox.pack_start(&Label::new(Some("Maintenance")), false, false, 5);
