@@ -2,11 +2,11 @@
 //! Configures window regions to ensure non-blocking user interaction.
 
 use xcb::{x, shape};
-use crate::core::config::Config;
+use anyhow::Result;
 
 /// [HARDENED] Applies an empty input mask to make the window click-through.
 /// This ensures the overlay does not steal focus or intercept user interactions.
-pub fn apply_input_mask(conn: &xcb::Connection, window: x::Window, _w: u16, _h: u16, _config: &Config) {
+pub fn apply_click_through(conn: &xcb::Connection, window: x::Window) -> Result<()> {
     // [HARDENING] Set empty input region to guarantee click-through transparency
     conn.send_request(&shape::Rectangles {
         operation: shape::So::Set,
@@ -17,4 +17,5 @@ pub fn apply_input_mask(conn: &xcb::Connection, window: x::Window, _w: u16, _h: 
         y_offset: 0,
         rectangles: &[],
     });
+    Ok(())
 }

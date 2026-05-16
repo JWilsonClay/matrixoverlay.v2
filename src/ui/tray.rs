@@ -12,9 +12,10 @@ pub const MENU_THEME_CLASSIC: &str = "theme_classic";
 pub const MENU_THEME_CALM: &str = "theme_calm";
 pub const MENU_THEME_ALERT: &str = "theme_alert";
 pub const MENU_TOGGLE_AUTO_COMMIT: &str = "toggle_auto_commit";
-pub const MENU_TOGGLE_OLLAMA: &str = "toggle_ollama";
+pub const MENU_TOGGLE_LITERT: &str = "toggle_litert";
 pub const MENU_CONFIG_GUI_ID: &str = "config_gui";
 pub const MENU_CONFIG_JSON_ID: &str = "config_json";
+pub const MENU_UPDATE_ID: &str = "update_check";
 
 pub struct SystemTray { _tray: tray_icon::TrayIcon, _menu: Menu }
 
@@ -40,7 +41,7 @@ impl SystemTray {
         
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&CheckMenuItem::with_id(MENU_TOGGLE_AUTO_COMMIT, "Auto-Commit Status", true, config.productivity.auto_commit_threshold > 0, None))?;
-        menu.append(&CheckMenuItem::with_id(MENU_TOGGLE_OLLAMA, "Ollama AI Insights", true, config.productivity.ollama_enabled, None))?;
+        menu.append(&CheckMenuItem::with_id(MENU_TOGGLE_LITERT, "LiteRT AI Insights", true, config.productivity.ollama_enabled, None))?;
         
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&MenuItem::with_id(MENU_QUIT_ID, "Quit", true, None))?;

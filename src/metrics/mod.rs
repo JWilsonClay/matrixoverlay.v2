@@ -62,6 +62,21 @@ impl MetricId {
             Self::Custom(s) => s.as_str(),
         }
     }
+
+    pub fn label(&self) -> &str {
+        match self {
+            Self::CpuUsage => "CPU", Self::RamUsage => "RAM",
+            Self::RamUsed => "RAM Used", Self::RamTotal => "RAM Total",
+            Self::LoadAvg => "Load", Self::Uptime => "Uptime",
+            Self::NetworkDetails => "Net", Self::DiskUsage => "Disk",
+            Self::CpuTemp => "CPU Temp", Self::FanSpeed => "Fan",
+            Self::GpuTemp => "GPU Temp", Self::GpuUtil => "GPU Util",
+            Self::WeatherTemp => "Weather", Self::WeatherCondition => "Cond",
+            Self::DayOfWeek => "Day", Self::CodeDelta => "Git",
+            Self::OverlayCpu => "HUD CPU", Self::LocationData => "Loc",
+            Self::Custom(_) => "Metric",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

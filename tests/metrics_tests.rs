@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
 use matrix_overlay::metrics::{
     MetricCollector, MetricId, MetricValue, HwmonCollector, NvidiaSmiCollector, 
-    OpenMeteoCollector, SysinfoCollector, SysinfoManager
+    OpenMeteoCollector, CpuCollector, MemoryCollector, UptimeLoadCollector, SysinfoManager
 };
 
 #[test]
@@ -132,7 +132,7 @@ fn test_sysinfo_collector_defaults() {
     // the collector runs against the real system without panicking and returns valid types.
     let manager = Arc::new(Mutex::new(SysinfoManager::new()));
     
-    let mut cpu_collector = SysinfoCollector::new(MetricId::CpuUsage, manager.clone());
+    let mut cpu_collector = CpuCollector::new(manager.clone());
     let cpu_map = cpu_collector.collect();
     if let Some(MetricValue::Float(v)) = cpu_map.get(&MetricId::CpuUsage) {
         assert!(*v >= 0.0 && *v <= 100.0, "CPU usage {} out of range", *v);
@@ -140,7 +140,7 @@ fn test_sysinfo_collector_defaults() {
         panic!("CPU Usage should be float");
     }
 
-    let mut ram_collector = SysinfoCollector::new(MetricId::RamUsage, manager.clone());
+    let mut ram_collector = MemoryCollector::new(manager.clone());
     let ram_map = ram_collector.collect();
     if let Some(MetricValue::Float(v)) = ram_map.get(&MetricId::RamUsage) {
         assert!(*v >= 0.0 && *v <= 100.0, "RAM usage {} out of range", *v);
@@ -148,7 +148,7 @@ fn test_sysinfo_collector_defaults() {
         panic!("RAM Usage should be float");
     }
 
-    let mut uptime_collector = SysinfoCollector::new(MetricId::Uptime, manager.clone());
+    let mut uptime_collector = UptimeLoadCollector::new(manager.clone());
     let uptime_map = uptime_collector.collect();
     if let Some(MetricValue::Int(v)) = uptime_map.get(&MetricId::Uptime) {
         assert!(*v > 0, "Uptime should be positive");

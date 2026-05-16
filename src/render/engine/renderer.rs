@@ -32,7 +32,7 @@ impl Renderer {
             surface: s, base_font: font, width: w as i32, height: h as i32,
             color_rgb: parse_hex_color(&config.general.color).unwrap_or((0.0, 1.0, 0.25)),
             config_layout: layout, monitor_index: idx, scroll: RefCell::new(HashMap::new()),
-            rain: RainManager::new(config.cosmetics.realism_scale), frames: RefCell::new(0),
+            rain: RainManager::new(config.cosmetics.realism), frames: RefCell::new(0),
             item_states: RefCell::new(Vec::new()), visual_elements: RefCell::new(Vec::new()),
             logger: if config.logging.enabled { Some(crate::core::logging::Logger::new(&config.logging.log_path, config.logging.max_files, config.logging.max_file_size_mb)) } else { None },
         })

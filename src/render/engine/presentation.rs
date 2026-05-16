@@ -4,7 +4,7 @@ use xcb::x;
 use super::renderer::Renderer;
 
 impl Renderer {
-    pub fn present(&self, conn: &xcb::Connection, window: x::Window) -> Result<()> {
+    pub fn present(&mut self, conn: &xcb::Connection, window: x::Window) -> Result<()> {
         self.surface.flush();
         let data = self.surface.data().map_err(|e| anyhow::anyhow!("Cairo data access failed: {}", e))?;
         let gc: x::Gcontext = conn.generate_id();

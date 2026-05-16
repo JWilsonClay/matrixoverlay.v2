@@ -18,7 +18,7 @@ impl Renderer {
 
     pub fn update_config(&mut self, config: Config) {
         self.config_layout = crate::core::layout::compute(&config, self.monitor_index, self.width as u16, self.height as u16);
-        self.rain.realism_scale = config.cosmetics.realism_scale;
+        self.rain.realism = config.cosmetics.realism;
         self.color_rgb = match config.general.theme.as_str() {
             "calm" => (0.0, 0.8, 1.0), "alert" => (1.0, 0.2, 0.2),
             _ => layout::parse_hex_color(&config.general.color).unwrap_or((0.0, 1.0, 0.25)),
@@ -43,7 +43,7 @@ impl Renderer {
             if let Some(id) = MetricId::from_str(&item.metric_id) {
                 if let Some(v) = metrics.values.get(&id) {
                     let v_s = layout::format_metric_value(v);
-                    let lbl = if item.label.is_empty() { id.label() } else { item.label.clone() };
+                    let lbl = if item.label.is_empty() { id.label() } else { item.label.as_str() };
                     if let Ok(Some(el)) = layout::draw_metric_pair(cr, &lbl, &v_s, item.x as f64, item.y as f64, item.max_width as f64, &item.metric_id, true, &config.general.glow_passes, config, item, self.color_rgb, &mut self.scroll.borrow_mut()) {
                         self.visual_elements.borrow_mut().push(el);
                     }

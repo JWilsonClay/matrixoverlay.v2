@@ -18,7 +18,7 @@ pub fn detect_other_instances() -> Vec<u32> {
             (name == "matrix-overlay" || name == "matrix_overlay") 
             && Some(**pid) != current_pid
         })
-        .map(|(pid, _)| pid.as_u32())
+        .map(|(pid, _)| format!("{}", pid).parse::<u32>().unwrap_or(0))
         .collect()
 }
 

@@ -17,7 +17,7 @@ pub fn create_collectors(config: &Config) -> Vec<Box<dyn MetricCollector>> {
         MetricId::CpuUsage, MetricId::RamUsage, MetricId::Uptime, 
         MetricId::NetworkDetails, MetricId::CpuTemp, MetricId::FanSpeed, MetricId::DayOfWeek
     ];
-    for &id in &defaults { ids.insert(id); }
+    for id in &defaults { ids.insert(id.clone()); }
 
     for screen in &config.screens {
         for m in &screen.metrics { if let Some(id) = MetricId::from_str(m) { ids.insert(id); } }
@@ -42,7 +42,7 @@ pub fn create_collectors(config: &Config) -> Vec<Box<dyn MetricCollector>> {
         collectors.push(Box::new(NvidiaSmiCollector::new(unit)));
     }
     if config.weather.enabled {
-        collectors.push(Box::new(OpenMeteoCollector::new_with_unit(
+        collectors.push(Box::new(OpenMeteoCollector::new(
             config.weather.lat, config.weather.lon, true, 
             config.weather.auto_location, config.general.temp_unit.clone()
         )));

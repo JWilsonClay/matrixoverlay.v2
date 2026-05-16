@@ -49,7 +49,7 @@ pub fn run() -> Result<()> {
 
     // 7. Initialize Update Manager
     let update_manager = UpdateManager::new("JWilsonClay", "matrixoverlay.v2", update_tx);
-    let _update_handle = update_manager.spawn_checker(24);
+    let _update_handle = update_manager.spawn_checker(24, Arc::clone(&shutdown));
     
     // 8. Spawn Core Threads
     threads::spawn_xcb_thread(Arc::clone(&conn), xcb_tx);

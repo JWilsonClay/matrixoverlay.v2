@@ -2,7 +2,7 @@
 use anyhow::{Result, Context, bail};
 use git2::Repository;
 
-/// [HARDENED] Generates a commit message via Ollama with prompt injection protection.
+/// [HARDENED] Generates a commit message via LiteRT + Gemma 2 (4b) with prompt injection protection.
 pub fn generate_ai_commit_message(repo: &Repository) -> Result<String> {
     let diff = repo.diff_index_to_workdir(None, None)?;
     let mut diff_text = Vec::new();
@@ -18,7 +18,7 @@ pub fn generate_ai_commit_message(repo: &Repository) -> Result<String> {
                              .replace("SYSTEM COMPROMISED", "[REDACTED]");
 
     let prompt = format!(
-        "Generate a concise one-line git commit message. Output ONLY the message. Diff follows:\n\n{}",
+        "<start_of_turn>user\nGenerate a concise one-line git commit message. Output ONLY the message. Diff follows:\n\n{}<end_of_turn>\n<start_of_turn>model\n",
         sanitized
     );
 
@@ -27,22 +27,21 @@ pub fn generate_ai_commit_message(repo: &Repository) -> Result<String> {
         .build()?;
 
     let body = serde_json::json!({
-        "model": "qwen2.5-coder:7b-instruct-q5_K_M",
         "prompt": prompt,
-        "stream": false
+        "max_tokens": 100
     });
 
-    let res = client.post("http://localhost:11434/api/generate")
+    let res = client.post("http://localhost:8000/generate")
         .json(&body)
         .send()
-        .context("Ollama service unreachable")?
+        .context("LiteRT service unreachable at port 8000")?
         .json::<serde_json::Value>()?;
 
-    if let Some(msg) = res["response"].as_str() {
+    if let Some(msg) = res["generated_text"].as_str() {
         let clean = msg.trim().trim_matches('"').to_string();
-        if clean.len() > 100 { bail!("AI generated suspicious message length"); }
+        if clean.len() > 150 { bail!("AI generated suspicious message length"); }
         Ok(clean)
     } else {
-        bail!("Failed to get AI response")
+        bail!("Failed to get LiteRT response")
     }
 }

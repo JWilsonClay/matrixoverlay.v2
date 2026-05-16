@@ -24,7 +24,7 @@ pub fn update_config_from_widgets(
 
     // Cosmetics
     new_config.cosmetics.rain_speed = cos_w.0.value();
-    new_config.cosmetics.realism_scale = cos_w.1.value() as u32;
+    new_config.cosmetics.realism = cos_w.1.value() as u32;
     new_config.cosmetics.metrics_brightness = cos_w.2.value();
     new_config.cosmetics.matrix_brightness = cos_w.3.value();
     new_config.cosmetics.background_opacity = cos_w.4.value();

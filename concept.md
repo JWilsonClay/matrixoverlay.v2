@@ -17,10 +17,10 @@ The application functions as a "Heads-Up Display" (HUD) for the modern developer
 ### 2. Forensic Productivity
 - **Git Delta Tracking**: Real-time display of code changes (+/- lines) over a rolling 24-hour window using the `git2` substrate.
 - **Automated Backups**: Hourly auto-commits with configurable thresholds (e.g., >1000 lines).
-- **AI Insights**: Contextual commit messages and code tips generated via local **Ollama (qwen2.5)** integration.
+- **AI Insights**: Contextual commit messages and code tips generated via local **LiteRT + Gemma 2 (4b)** integration.
 - **Dynamic Resource Protection**:
     - **Load Throttling**: AI inference and Git delta calculations are skipped if the system load exceeds **80%** to prioritize user workflow stability.
-    - **Nice Threading**: Background tasks (Ollama calls, repository audits) are executed on **low-priority (nice) threads** to prevent GUI jitter or CPU contention on the Dell G15 Ryzen platform.
+    - **Nice Threading**: Background tasks (LiteRT inference, repository audits) are executed on **low-priority (nice) threads** to prevent GUI jitter or CPU contention on the Dell G15 Ryzen platform.
     - **Fallback Logic**: If AI inference fails or is skipped, the system defaults to a structured generic commit message to maintain history integrity.
 
 ---
@@ -28,7 +28,9 @@ The application functions as a "Heads-Up Display" (HUD) for the modern developer
 ## III. Architectural Governance
 The project adheres to the **Sovereign AI Engineering** standards:
 - **Decoupled Domains**: Metrics, Rendering, GUI, and Logic are isolated into independent modules.
-- **125-Line Limit**: No single functional file exceeds 125 lines, ensuring maximum auditability and maintainability.
+- **Sovereign Line Limits**:
+    - **125 Lines**: Target for all "Skeleton" and new functional modules to ensure decomposition.
+    - **175 Lines**: Maximum limit for "Hardened" modules to accommodate copious documentation and validation logic.
 - **Zero-Trust Input**: Every GUI parameter and configuration value is strictly bounded and sanitized before entering the rendering pipeline.
 - **Performance First**: Total system impact target is **<1-3% CPU usage**, with deep optimizations for hybrid graphics (AMD iGPU + NVIDIA dGPU).
 

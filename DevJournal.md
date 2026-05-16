@@ -127,3 +127,63 @@ The development triad ensures high-fidelity execution through distributed author
 - **Focus**: `Integration points`, `Dependencies`, `Final readiness`.
 
 ---
+
+## VII. Theoretical Pipeline Blueprint (S1-S8)
+**[INJECTION - 2026-05-15] -- Forensic Mapping of Master Inventory to Execution Stages**
+
+This blueprint provides the "Governance Map" for the Matrix Overlay codebase. It transforms the flat file inventory into a multidimensional maintenance framework.
+
+### Stage 1: Code Structure & Style (The Skeleton)
+*   **Substrates**: `src/lib.rs`, `src/main.rs`, `src/core/mod.rs`, `src/metrics/mod.rs`, `src/ui/mod.rs`.
+*   **Role**: Enforces the 125-line limit and Sovereign Substrate boundaries.
+
+### Stage 2: Functional Correctness (The Logic)
+*   **Substrates**: All `collectors/*.rs`, `manager.rs`, `physics.rs`, `ai.rs`.
+*   **Role**: Logic-gate verification for data collection and Matrix rain simulation.
+
+### Stage 3: Debugging / Specific Issues (The Triage)
+*   **Substrates**: `build_logger.rs`, `logging/mod.rs`, `reproduce_tray.rs`.
+*   **Role**: Forensic visibility into runtime anomalies and substrate trauma.
+
+### Stage 4: Security Audit (The Shield)
+*   **Substrates**: `validation.rs`, `shape.rs`, `storage.rs`, `init.rs`.
+*   **Role**: Regex-constrained sanitization and defense against path traversal/injection.
+
+### Stage 5: Testing Strategy (The Assurance)
+*   **Substrates**: `/tests/` directory and internal mocking interfaces (`ai.rs`, `weather.rs`).
+*   **Role**: Stability verification through failure-mode simulation and E2E gates.
+
+### Stage 6: Performance / Optimization (The Pulse)
+*   **Substrates**: `threads/mod.rs`, `dispatch.rs`, `update.rs`.
+*   **Role**: Protecting the <1% CPU target through async delivery and redraw throttling.
+
+### Stage 7: Documentation & Maintainability (The Legacy)
+*   **Substrates**: `defaults.rs`, `concept.md`, `DevJournal.md`.
+*   **Role**: Intent preservation and copious detail injection for future auditability.
+
+### Stage 8: Final Integration Review (The Whole)
+*   **Substrates**: `gui/mod.rs`, `tray.rs`, `creation.rs`, `atoms.rs`.
+*   **Role**: Orchestration of decoupled domains into a singular operating HUD.
+
+---
+
+## VIII. SEITS Initialization & Governance Pivot
+**[INJECTION - 2026-05-15] -- Transitioning to High-Fidelity Validation**
+
+This entry anchors the pivot from Phase 0 (Consolidation) to Phase 5 (Verification).
+
+### 1. AI Substrate Transition
+- **From**: Ollama (Local API)
+- **To**: LiteRT + Gemma 2 (4b)
+- **Reason**: Precise regex-constrained inference and direct local control via the `sovereign-litert` substrate at `/home/jwils/Public/sovereign-litert`.
+
+### 2. Tiered Line-Limit Governance
+- **Skeleton Limit (125 Lines)**: Maintained for initial decomposition and modular spikes.
+- **Hardened Limit (175 Lines)**: Established for mature modules to accommodate "Copious Detail" (docstrings, extensive validation, and forensic logging) without forced, unnatural fragmentation.
+
+### 3. SEITS Orchestrator (v1.0)
+- **Design**: 5-Phase iterative validation loop.
+- **Protocols**: Mandatory **Intelligence Bridge Declaration** and **HOT Execution** mandates per the `/iterate-test` protocol.
+- **Output**: `VALIDATION_RECEIPT.md`.
+
+---

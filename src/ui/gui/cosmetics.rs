@@ -16,7 +16,7 @@ pub fn build(vbox: &Box, config: &Config) -> (SpinButton, SpinButton, SpinButton
 
     vbox.pack_start(&Label::new(Some("Rain Density (Volume)")), false, false, 0);
     let realism_spin = SpinButton::with_range(0.0, 50.0, 1.0);
-    realism_spin.set_value(config.cosmetics.realism_scale as f64);
+    realism_spin.set_value(config.cosmetics.realism as f64);
     vbox.pack_start(&realism_spin, false, false, 0);
 
     vbox.pack_start(&Label::new(Some("Metrics Brightness (HUD)")), false, false, 0);

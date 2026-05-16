@@ -13,6 +13,10 @@ impl HwmonCollector {
         Self { base_path: PathBuf::from("/sys/class/hwmon"), temp_unit }
     }
 
+    pub fn new_with_path(_id: crate::metrics::MetricId, base_path: PathBuf) -> Self {
+        Self { base_path, temp_unit: "celsius".to_string() }
+    }
+
     fn read_val<P: AsRef<Path>>(&self, p: P) -> Option<i64> {
         fs::read_to_string(p).ok()?.trim().parse().ok()
     }

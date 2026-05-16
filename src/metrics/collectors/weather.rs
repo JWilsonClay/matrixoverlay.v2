@@ -1,6 +1,7 @@
 //! Weather metrics collection substrate via Open-Meteo.
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use anyhow::Result;
 use serde::Deserialize;
 use crate::metrics::{MetricId, MetricValue, MetricCollector};
 
@@ -10,13 +11,18 @@ use crate::metrics::{MetricId, MetricValue, MetricCollector};
 #[derive(Debug)]
 pub struct OpenMeteoCollector {
     lat: f64, lon: f64, enabled: bool, auto_loc: bool, temp_unit: String,
+    url: Option<String>,
     last_fetch: Option<Instant>, last_ok: Option<Instant>,
     c_temp: Option<String>, c_cond: Option<String>,
 }
 
 impl OpenMeteoCollector {
     pub fn new(lat: f64, lon: f64, enabled: bool, auto_loc: bool, temp_unit: String) -> Self {
-        Self { lat, lon, enabled, auto_loc, temp_unit, last_fetch: None, last_ok: None, c_temp: None, c_cond: None }
+        Self { lat, lon, enabled, auto_loc, temp_unit, url: None, last_fetch: None, last_ok: None, c_temp: None, c_cond: None }
+    }
+
+    pub fn new_with_url(_id: crate::metrics::MetricId, lat: f64, lon: f64, url: String) -> Self {
+        Self { lat, lon, enabled: true, auto_loc: false, temp_unit: "celsius".to_string(), url: Some(url), last_fetch: None, last_ok: None, c_temp: None, c_cond: None }
     }
 
     fn code_to_str(c: i64) -> &'static str {
@@ -38,7 +44,9 @@ impl MetricCollector for OpenMeteoCollector {
         }}
         self.last_fetch = Some(now);
 
-        let url = format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code", self.lat, self.lon);
+        let url = self.url.clone().unwrap_or_else(|| {
+            format!("https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,weather_code", self.lat, self.lon)
+        });
         let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(5)).build().ok();
         if let Some(c) = client { if let Ok(resp) = c.get(&url).send() {
             if let Ok(json) = resp.json::<OpenMeteoResponse>() {
@@ -55,4 +63,20 @@ impl MetricCollector for OpenMeteoCollector {
         if let Some(t) = &self.c_temp { map.insert(MetricId::WeatherTemp, MetricValue::String(t.clone())); }
         map
     }
+}
+
+/// [HARDENED] Fetches current lat/lon via GeoIP with failure isolation.
+pub fn fetch_geoip_location() -> Result<(f64, f64)> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()?;
+    
+    let resp = client.get("http://ip-api.com/json")
+        .send()?
+        .json::<serde_json::Value>()?;
+    
+    let lat = resp["lat"].as_f64().ok_or_else(|| anyhow::anyhow!("Lat missing"))?;
+    let lon = resp["lon"].as_f64().ok_or_else(|| anyhow::anyhow!("Lon missing"))?;
+    
+    Ok((lat, lon))
 }

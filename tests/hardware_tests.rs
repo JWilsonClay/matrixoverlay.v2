@@ -14,7 +14,7 @@ use xcb::x;
 use matrix_overlay::core::config::Config;
 use matrix_overlay::metrics::{
     HwmonCollector, MetricId, MetricCollector, NvidiaSmiCollector, 
-    SysinfoCollector, SysinfoManager, MetricValue
+    CpuCollector, DiskCollector, SysinfoManager, MetricValue
 };
 use matrix_overlay::core::window::create_all_windows;
 
@@ -99,7 +99,7 @@ fn test_high_cpu_load_resilience() {
 
     let start = Instant::now();
     let manager = Arc::new(Mutex::new(SysinfoManager::new()));
-    let mut collector = SysinfoCollector::new(MetricId::CpuUsage, manager);
+    let mut collector = CpuCollector::new(manager);
     
     // Perform collection
     let _ = collector.collect();
@@ -134,7 +134,7 @@ fn test_high_disk_io_resilience() {
 
     let start = Instant::now();
     let manager = Arc::new(Mutex::new(SysinfoManager::new()));
-    let mut collector = SysinfoCollector::new(MetricId::DiskUsage, manager);
+    let mut collector = DiskCollector::new(manager);
     
     let _ = collector.collect();
     let duration = start.elapsed();

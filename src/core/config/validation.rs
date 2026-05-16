@@ -54,8 +54,8 @@ pub fn validate_config(config: &Config) -> Result<()> {
     if config.cosmetics.rain_speed < 0.0 || config.cosmetics.rain_speed > 10.0 {
         bail!("rain_speed must be between 0.0 and 10.0");
     }
-    if config.cosmetics.realism_scale > 100 {
-        bail!("realism_scale must be <= 100");
+    if config.cosmetics.realism > 100 {
+        bail!("realism must be <= 100");
     }
     if config.cosmetics.metrics_brightness < 0.0 || config.cosmetics.metrics_brightness > 1.0 {
         bail!("metrics_brightness must be between 0.0 and 1.0");
