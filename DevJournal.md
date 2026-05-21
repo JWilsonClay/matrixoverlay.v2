@@ -1,3 +1,9 @@
+2026-05-20 Antigravity broke because Google retired Gemini 3 Flash and the token limits are fractioned. I'm back to manual coding with Grok.  Not hating it. I like Grok, it's just much slower.  But good use of my paid subscription!
+
+rebuild and retest command:
+cargo build --release
+RUST_LOG=debug ./target/release/matrix-overlay
+
 # Matrix Overlay v2 Development Journal
 
 ## 2026-05-15 -- Workspace Audit & Gap Analysis
