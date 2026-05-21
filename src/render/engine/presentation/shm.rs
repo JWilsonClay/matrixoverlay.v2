@@ -35,6 +35,9 @@ pub struct ShmPresenter {
     conn: Arc<xcb::Connection>,
     width: u16,
     height: u16,
+    // True after a PutImage has been sent but before the X server has confirmed
+    // it is done reading from the SHM region. Cleared in pre_draw() via sync.
+    frame_pending: bool,
 }
 
 impl ShmPresenter {
@@ -84,6 +87,7 @@ impl ShmPresenter {
             conn: Arc::clone(conn),
             width: w,
             height: h,
+            frame_pending: false,
         })
     }
 }
@@ -92,6 +96,19 @@ impl Presenter for ShmPresenter {
     fn surface(&self) -> &ImageSurface {
         // surface is always Some during normal operation; only None inside drop().
         self.surface.as_ref().expect("ShmPresenter surface accessed after drop")
+    }
+
+    fn pre_draw(&mut self, conn: &xcb::Connection) -> Result<()> {
+        if self.frame_pending {
+            // Force a synchronous round-trip. By the time the X server replies to
+            // GetInputFocus it has sequentially processed all prior requests,
+            // including the ShmPutImage. The SHM region is safe to overwrite.
+            let cookie = conn.send_request(&x::GetInputFocus {});
+            conn.wait_for_reply(cookie)
+                .map_err(|e| anyhow::anyhow!("SHM sync failed: {:?}", e))?;
+            self.frame_pending = false;
+        }
+        Ok(())
     }
 
     fn present(&mut self, conn: &xcb::Connection, window: x::Window) -> Result<()> {
@@ -125,6 +142,8 @@ impl Presenter for ShmPresenter {
             offset: 0,
         });
         conn.send_request(&x::FreeGc { gc });
+        let _ = conn.flush();
+        self.frame_pending = true;
         Ok(())
     }
 

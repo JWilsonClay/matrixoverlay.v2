@@ -27,6 +27,7 @@ impl Renderer {
 
     pub fn draw(&mut self, conn: &xcb::Connection, window: x::Window, config: &Config, metrics: &MetricData, dt: Duration) -> Result<()> {
         *self.frames.borrow_mut() += 1;
+        self.presenter.pre_draw(conn)?;
         let cr = CairoContext::new(self.presenter.surface())?;
         self.clear(&cr)?;
         self.rain.update(dt, self.width, self.height, config);

@@ -8,6 +8,10 @@ use xcb::x;
 
 pub trait Presenter {
     fn surface(&self) -> &ImageSurface;
+    // Called at the start of each draw cycle, before Cairo touches the buffer.
+    // ShmPresenter uses this to block until the X server has finished reading
+    // the previous frame's SHM region; SocketPresenter is a no-op.
+    fn pre_draw(&mut self, conn: &xcb::Connection) -> Result<()>;
     fn present(&mut self, conn: &xcb::Connection, window: x::Window) -> Result<()>;
     fn resize(&mut self, w: u16, h: u16) -> Result<()>;
 }

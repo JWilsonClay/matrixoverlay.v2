@@ -20,6 +20,10 @@ impl Presenter for SocketPresenter {
         &self.surface
     }
 
+    fn pre_draw(&mut self, _conn: &xcb::Connection) -> Result<()> {
+        Ok(())
+    }
+
     fn present(&mut self, conn: &xcb::Connection, window: x::Window) -> Result<()> {
         self.surface.flush();
         // get_maximum_request_length() accounts for the BigRequests extension;
