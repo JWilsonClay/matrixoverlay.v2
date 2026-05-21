@@ -1,5 +1,96 @@
 2026-05-20 Antigravity broke because Google retired Gemini 3 Flash and the token limits are fractioned. I'm back to manual coding with Grok.  Not hating it. I like Grok, it's just much slower.  But good use of my paid subscription!
 
+---
+
+## 2026-05-21 -- LG TV 4K Crash Fix, Presenter Refactor, SHM Zero-Copy, SHM Sync
+
+### Session Summary
+This session with Claude resolved a crash on the LG TV (HDMI 4K, 4096×2160), refactored the rendering presentation layer, introduced MIT-SHM zero-copy frame delivery, and fixed a subsequent SHM race condition that caused visual flashing.
+
+### Problem 1: Hard Crash on 4K Display
+**Root Cause**: A single `xcb::x::PutImage` call sending ~31 MB of pixel data per frame exceeded the X11 server's maximum request size limit. The request silently failed or caused a connection error, crashing the overlay.
+
+**Resolution (Phase 1)**: Modified `src/render/engine/presentation.rs` to stripe `PutImage` calls. Each stripe is sized to fit within `conn.get_maximum_request_length() * 4 - 28` bytes (28 bytes = 7-word PutImage wire header). Key corrected formula details:
+- Use `surface.stride()` — not `width * 4` — because Cairo may pad rows for alignment.
+- Use `.max(1)` guard on stripe height to prevent division-by-zero.
+- Call `stride()`, `height()`, `width()` before `data()` — Cairo's `data()` takes a mutable borrow.
+
+Commit: `ea2cbd1`
+
+### Problem 2: Pre-existing Visual Regressions (from prior AI session)
+Two regressions were introduced by a previous Antigravity session:
+
+1. **`OverrideRedirect(true)` in `creation.rs`** — bypasses the window manager entirely. EWMH atoms (`_NET_WM_WINDOW_TYPE_DESKTOP`, `_NET_WM_STATE_BELOW`) are silently ignored, so the window stacks above everything instead of behind it. Fixed: reverted to `OverrideRedirect(false)`.
+
+2. **`Operator::Clear` in `pipeline.rs::clear()`** — makes the background fully transparent instead of opaque black. The prior fix for the crash had also removed the black background. Fixed: restored `Operator::Source + set_source_rgba(0,0,0,1)`.
+
+Commit: `ea2cbd1`
+
+### Phase 2: Presenter Trait Refactor
+Extracted the raw presentation logic into a `Presenter` trait (`src/render/engine/presentation/mod.rs`) with two implementations:
+- `SocketPresenter` — the working stripe loop; baseline safe path.
+- `ShmPresenter` — zero-copy SHM path (Phase 3).
+
+`Renderer` now holds `Box<dyn Presenter>` instead of a raw `ImageSurface`. `pipeline.rs` calls `self.presenter.surface()` and `self.presenter.present()`. No behavior change from Phase 1.
+
+Commit: `e948079`
+
+### Phase 3: MIT-SHM Zero-Copy Presentation
+Replaced socket-based `PutImage` (which copies ~34 MB over the X socket per frame at 4K) with `xcb::shm::PutImage`, which reads pixel data directly from a shared memory segment.
+
+Key implementation details:
+- `shmget(IPC_PRIVATE)` → `shmat` → `IPC_RMID` (auto-destroy on detach for crash safety).
+- `ShmBuffer` unsafe wrapper: satisfies `AsMut<[u8]> + Send` for `ImageSurface::create_for_data` without triggering allocator free on drop.
+- `conn: Arc<xcb::Connection>` stored in `ShmPresenter` so `Drop` can call `xcb::shm::Detach`.
+- **Drop ordering is critical**: `surface.take()` (drop Cairo first) → `shm::Detach` → `libc::shmdt`. Calling `shmdt` while Cairo still holds a pointer to the SHM region is undefined behavior.
+- Feature gate: `xcb::shm::QueryVersion {}` probe at startup; falls back to `SocketPresenter` if SHM is unavailable.
+- `xcb::shm::PutImage::format` is `u8`, value `2` (ZPixmap) — not the `x::ImageFormat` enum.
+
+Startup log confirmed: `[Presenter] MIT-SHM available — using zero-copy ShmPresenter` on both monitors (laptop 1080p + LG TV 4K).
+
+Commit: `8a02ba5`
+
+### Problem 3: SHM Race Condition (Flashing / Rain Stutter)
+After Phase 3 was live, the overlay showed rapid on/off flashing of metrics and rain stutter.
+
+**Root Cause**: `ImageSurface::create_for_data` causes Cairo to write *directly* into the SHM region (no copy). When the 30fps tick fired the next `clear()` call, it overwrote the SHM buffer with black while the X server was still reading the previous `ShmPutImage` from that same memory. The X server caught mid-cleared or mid-drawn frames — hence the flash-to-black and partial frames.
+
+**Resolution (Phase 4)**: Added a `pre_draw()` hook to the `Presenter` trait, called at the top of `pipeline.rs::draw()` before `CairoContext::new`. `ShmPresenter::pre_draw()` issues a `GetInputFocus` round-trip request and waits for the reply. By the time the X server replies, it has sequentially processed all prior requests including the `ShmPutImage`, so the SHM region is safe to overwrite. `SocketPresenter::pre_draw()` is a no-op (socket PutImage copies data before returning). Round-trip overhead is <1ms on a local X socket.
+
+Commit: `380107f`
+
+### Architecture State After This Session
+
+**Rendering pipeline** (`src/render/engine/`):
+```
+pipeline.rs::draw()
+  └─ presenter.pre_draw()   ← SHM sync gate (new)
+  └─ CairoContext::new(presenter.surface())
+  └─ clear() + rain + metrics
+  └─ presenter.present()    ← SHM: PutImage zero-copy; Socket: stripe loop
+```
+
+**Presenter selection** (`presentation/mod.rs::create_presenter()`):
+```
+QueryVersion → SHM available?
+  Yes → ShmPresenter::new() → fallback to SocketPresenter on init error
+  No  → SocketPresenter
+```
+
+**Presenter trait**:
+```rust
+fn pre_draw(&mut self, conn: &xcb::Connection) -> Result<()>;  // sync gate
+fn surface(&self) -> &ImageSurface;
+fn present(&mut self, conn: &xcb::Connection, window: x::Window) -> Result<()>;
+fn resize(&mut self, w: u16, h: u16) -> Result<()>;
+```
+
+### Hardware Confirmed Working
+- Dell G15 laptop display: 1920×1080, ShmPresenter
+- LG TV via HDMI: 4096×2160, ShmPresenter
+- Overlay CPU: ~4% (acceptable for 4K zero-copy at 30fps)
+- All metrics rendering correctly, black background, correct desktop layering
+
 rebuild and retest command:
 cargo build --release
 RUST_LOG=debug ./target/release/matrix-overlay

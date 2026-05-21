@@ -31,6 +31,36 @@
   - **Mechanism**: XShape extension (`xcb_shape_rectangles` or `x11rb::protocol::shape`). Set the Input region to an empty list of rectangles.
   - **Verification**: `xprop -id <window_id>` should show `_NET_WM_WINDOW_TYPE(ATOM) = _NET_WM_WINDOW_TYPE_DESKTOP`.
 
+### OverrideRedirect Pitfall (CONFIRMED BUG — 2026-05-21)
+**Never set `OverrideRedirect(true)` on the overlay window.** This bypasses the window manager entirely. All EWMH atoms (`_NET_WM_WINDOW_TYPE_DESKTOP`, `_NET_WM_STATE_BELOW`) are silently ignored, and the window stacks above everything — including application windows. The overlay appears "in front of everything" instead of on the desktop. The correct value is `OverrideRedirect(false)`.
+
+### Operator::Clear Pitfall (CONFIRMED BUG — 2026-05-21)
+**Do not use `Operator::Clear` in the `clear()` rendering step.** It sets the background to fully transparent (ARGB 0,0,0,0), removing the black backing. The correct operator is `Operator::Source` with `set_source_rgba(0.0, 0.0, 0.0, 1.0)`. These two regressions were introduced by a prior AI session and are subtle — the overlay can still render metrics correctly while appearing broken in layering and background.
+
+## MIT-SHM Pitfalls
+
+### SHM Race Condition: Cairo Writes Directly Into SHM (CONFIRMED BUG — 2026-05-21)
+When using `ImageSurface::create_for_data(ShmBuffer, ...)`, Cairo paints **directly into the SHM region** — there is no copy. The X server reads from the same region asynchronously after `ShmPutImage`. If the next frame's `clear()` fires before the X server has finished reading, it overwrites the buffer with black mid-read. The X server displays a corrupted frame (flash to black, partial content, or rain stutter).
+
+**Fix**: Before Cairo touches the buffer (before `clear()`), issue a synchronous round-trip to confirm the X server has finished:
+```rust
+// In Presenter::pre_draw() for ShmPresenter:
+let cookie = conn.send_request(&x::GetInputFocus {});
+conn.wait_for_reply(cookie)?;
+```
+By the time the reply arrives, the X server has sequentially processed all prior requests including the `ShmPutImage`. The SHM region is safe to overwrite. Round-trip overhead on a local X socket is <1ms.
+
+### SHM Drop Ordering (CRITICAL)
+The Cairo `ImageSurface` holds a live pointer into the SHM region. `shmdt()` must never be called while the surface is alive. In `Drop`:
+1. `self.surface.take()` — drop Cairo surface first
+2. `conn.send_request(&xcb::shm::Detach { ... })` — unregister from X server
+3. `libc::shmdt(self.shmaddr)` — unmap local address range
+
+Store the surface as `Option<ImageSurface>` to enable `take()` in `Drop`.
+
+### SHM PutImage: format is u8, not ImageFormat
+`xcb::shm::PutImage::format` is typed as `u8`. Use `2u8` for ZPixmap. The `x::ImageFormat::ZPixmap` enum variant does **not** coerce here — it will not compile.
+
 ### Hybrid Graphics (Prime)
 - **Flicker**: Rendering to an X11 window on the dGPU while the iGPU handles composition can cause tearing.
 - **Mitigation**: Ensure the overlay window is created on the screen/CRTC driven by the compositor. Use software double-buffering (Cairo ImageSurface -> X11 Pixmap -> Window) to decouple rendering from display scanout.
