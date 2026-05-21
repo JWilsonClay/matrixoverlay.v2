@@ -4,7 +4,7 @@ version = "0.1.1"
 edition = "2021"
 
 [dependencies]
-xcb = { version = "1.2", features = ["randr", "shape", "render", "xinput"] }
+xcb = { version = "1.2", features = ["randr", "shape", "render", "xinput", "shm"] }
 cairo-rs = { version = "0.18", features = ["xcb", "png"] }
 pangocairo = "0.18"
 pango = "0.18"

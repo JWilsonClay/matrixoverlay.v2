@@ -1,6 +1,7 @@
 // src/render/engine/renderer.rs
 use std::collections::HashMap;
 use std::cell::RefCell;
+use std::sync::Arc;
 use anyhow::Result;
 use pangocairo::pango::FontDescription;
 use crate::core::config::Config;
@@ -25,8 +26,8 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(w: u16, h: u16, idx: usize, layout: ConfigLayout, config: &Config) -> Result<Self> {
-        let presenter = create_presenter(w, h)?;
+    pub fn new(conn: &Arc<xcb::Connection>, w: u16, h: u16, idx: usize, layout: ConfigLayout, config: &Config) -> Result<Self> {
+        let presenter = create_presenter(conn, w, h)?;
         let font = FontDescription::from_string(&format!("Monospace {}", config.general.font_size));
         Ok(Self {
             presenter, base_font: font, width: w as i32, height: h as i32,

@@ -58,7 +58,7 @@ pub fn draw_frame(
 }
 
 pub fn handle_menu_event(
-    event: MenuEvent, config: &mut Config, renderers: &mut Vec<Renderer>,
+    conn: &Arc<xcb::Connection>, event: MenuEvent, config: &mut Config, renderers: &mut Vec<Renderer>,
     metrics_tx: &Sender<MetricsCommand>, control_tx: &Sender<GuiEvent>, shutdown: &Arc<AtomicBool>,
     update_manager: &Arc<crate::core::update::UpdateManager>, latest_version: &mut Option<String>,
 ) {
@@ -71,11 +71,11 @@ pub fn handle_menu_event(
                 let geometries: Vec<(u16, u16, usize)> = renderers.iter()
                     .map(|r| (r.width as u16, r.height as u16, r.monitor_index))
                     .collect();
-                
+
                 renderers.clear();
                 for (w, h, idx) in geometries {
                     let layout = crate::core::layout::compute(config, idx, w, h);
-                    match Renderer::new(w, h, idx, layout, config) {
+                    match Renderer::new(conn, w, h, idx, layout, config) {
                         Ok(r) => renderers.push(r),
                         Err(e) => {
                             log::error!("[HUD] Renderer init failed for monitor {}: {}", idx, e);
@@ -105,7 +105,8 @@ pub fn handle_menu_event(
 }
 
 pub fn handle_gui_event(
-    event: GuiEvent, config: &mut Config, renderers: &mut Vec<Renderer>, metrics_tx: &Sender<MetricsCommand>,
+    conn: &Arc<xcb::Connection>, event: GuiEvent, config: &mut Config, renderers: &mut Vec<Renderer>,
+    metrics_tx: &Sender<MetricsCommand>,
 ) {
     match event {
         GuiEvent::Reload => {
@@ -114,11 +115,11 @@ pub fn handle_gui_event(
                 let geometries: Vec<(u16, u16, usize)> = renderers.iter()
                     .map(|r| (r.width as u16, r.height as u16, r.monitor_index))
                     .collect();
-                
+
                 renderers.clear();
                 for (w, h, idx) in geometries {
                     let layout = crate::core::layout::compute(config, idx, w, h);
-                    match Renderer::new(w, h, idx, layout, config) {
+                    match Renderer::new(conn, w, h, idx, layout, config) {
                         Ok(r) => renderers.push(r),
                         Err(e) => log::error!("[GUI] Reload failed for monitor {}: {}", idx, e),
                     }

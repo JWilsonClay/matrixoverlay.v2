@@ -72,7 +72,7 @@ pub fn spawn_overlay_thread(
                 let w = geom.width();
                 let h = geom.height();
                 let layout = crate::core::layout::compute(&current_config, i, w, h);
-                if let Ok(r) = Renderer::new(w, h, i, layout, &current_config) {
+                if let Ok(r) = Renderer::new(&conn, w, h, i, layout, &current_config) {
                     renderers.push(r);
                 }
             }
@@ -102,8 +102,8 @@ pub fn spawn_overlay_thread(
             select! {
                 recv(xcb_rx) -> res => if let Ok(ev) = res { handle_xcb_event(ev, &conn, &wm, &mut visible, &metrics, &mut renderers, &current_config, &mut last_draw, key_w, key_q, &shutdown); },
                 recv(tick_rx) -> _ => if visible { draw_frame(&conn, &wm, &mut renderers, &current_config, &metrics, &mut last_draw); },
-                recv(MenuEvent::receiver()) -> res => if let Ok(ev) = res { handle_menu_event(ev, &mut current_config, &mut renderers, &metrics_tx, &control_tx, &shutdown, &update_manager, &mut latest_version); },
-                recv(gui_rx) -> res => if let Ok(ev) = res { handle_gui_event(ev, &mut current_config, &mut renderers, &metrics_tx); },
+                recv(MenuEvent::receiver()) -> res => if let Ok(ev) = res { handle_menu_event(&conn, ev, &mut current_config, &mut renderers, &metrics_tx, &control_tx, &shutdown, &update_manager, &mut latest_version); },
+                recv(gui_rx) -> res => if let Ok(ev) = res { handle_gui_event(&conn, ev, &mut current_config, &mut renderers, &metrics_tx); },
                 recv(update_rx) -> res => if let Ok(ev) = res { handle_update_event(ev, &control_tx, &mut latest_version); }
             }
         }
