@@ -27,14 +27,14 @@ impl Renderer {
 
     pub fn draw(&mut self, conn: &xcb::Connection, window: x::Window, config: &Config, metrics: &MetricData, dt: Duration) -> Result<()> {
         *self.frames.borrow_mut() += 1;
-        let cr = CairoContext::new(&self.surface)?;
+        let cr = CairoContext::new(self.presenter.surface())?;
         self.clear(&cr)?;
         self.rain.update(dt, self.width, self.height, config);
         self.visual_elements.borrow_mut().clear();
         if config.cosmetics.rain_mode == "fall" { self.rain.draw(&cr, self.width as f64, self.height as f64, *self.frames.borrow(), config)?; }
         self.draw_metrics(&cr, config, metrics)?;
         drop(cr);
-        self.present(conn, window)?;
+        self.presenter.present(conn, window)?;
         Ok(())
     }
 
