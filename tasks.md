@@ -22,6 +22,12 @@
 >    timing does not describe it.
 > 3. **`cargo test` is not a blanket gate.** `tests/window_integration.rs` maps windows onto the live
 >    desktop and asserts a geometry that is false on this host (R-11). No phase may require it green.
+>
+> **Execution gate (round-2 audit, 2026-09-03).** Authorized scope is **Phases 1 and 2 only**, then a
+> mandatory stop. Phase 1 measures S-13b and converts A-01 from assumption to reading; Phase 2 produces
+> the red MRC and measures S-13a. **Do not open Phase 3 on the pre-audit arithmetic** — re-derive
+> Phase 5's default `target_fps` from the numbers those two phases actually produce. The 10 fps in task
+> 5.3 is a placeholder that the budget identity is expected to lower.
 
 ---
 
@@ -35,17 +41,19 @@ survived ~24h because `overlay_cpu` reported it as 3.79% and nothing exposed the
 
 ### Tasks
 - [ ] 1.0 — Create `receipts/BUILD_RECEIPTS.md` at the repository root on first write. Every later phase appends to it. Do not create `.workflow_state/`; it does not exist and nothing requires it.
-- [ ] 1.1 — Fix `OverlayCpuCollector` normalization in [process.rs:27-30](src/metrics/collectors/system/process.rs#L27-L30). Remove the `/ cores` division so the value matches `top` semantics (% of one core). Retain the whole-machine figure only if surfaced under a distinct, differently-labeled metric.
+- [ ] 1.1 — Fix `OverlayCpuCollector` normalization in [process.rs:27-30](src/metrics/collectors/system/process.rs#L27-L30). Remove the `/ cores` division so the value matches **Method M-1** semantics (% of one core). Retain the whole-machine figure only if surfaced under a distinct, differently-labeled metric.
 - [ ] 1.2 — Add an inline comment at the fix site recording *why* `sysinfo`'s own doc advice (`traits.rs:358` — "divide by the number of CPUs") is not followed: it yields %-of-machine, while the metric's on-screen label — **"HUD CPU"** ([metrics/mod.rs:76](src/metrics/mod.rs#L76)) — invites comparison against an external per-core reading. Prevents a well-meaning future revert.
 - [ ] 1.3 — Add a `Fps` variant to `MetricId` in [metrics/mod.rs](src/metrics/mod.rs) with `from_str`/`as_str`/`label` arms, following the existing `OverlayCpu` pattern exactly.
 - [ ] 1.4 — Implement frame-rate measurement as an **`AtomicU64` incremented inside `Presenter::present`** ([presentation/mod.rs:15](src/render/engine/presentation/mod.rs#L15)) — one count per successful present, per monitor. **Audit correction:** do *not* source it from `Renderer::frames`. That counter is incremented at [pipeline.rs:29](src/render/engine/pipeline.rs#L29) on every `draw()`, which includes `Expose`-driven draws ([handlers.rs:31-37](src/core/threads/handlers.rs#L31-L37)), so it is a draw count, not a present count — and it never reaches `SharedMetrics` at all.
 - [ ] 1.4b — **Audit correction — S-06 is otherwise unimplementable.** A value written directly into `SharedMetrics.data` is erased on the next collection tick: [manager.rs:54](src/metrics/manager.rs#L54) does `sh.data = MetricData { values: frame }`, a wholesale replacement built only from the collector list. Publish `fps` through a small `FpsCollector` that reads the atomic, so it lands *inside* `frame` rather than being overwritten by it. This is the one named exception to "collector logic beyond `overlay_cpu` is out of scope" (plan §1.2).
 - [ ] 1.5 — Register `fps` in [metrics/mod.rs](src/metrics/mod.rs) (`MetricId` + `from_str`/`as_str`/`label` arms) and [dispatch.rs](src/metrics/dispatch.rs) **only**. **Audit correction:** the previous instruction to edit [ui/gui/metrics.rs:16](src/ui/gui/metrics.rs#L16) and [factory.rs](src/metrics/factory.rs) is *Sound Effect Execution* — [ui/gui/mod.rs:38-53](src/ui/gui/mod.rs#L38-L53) appends only General, Cosmetics, Weather and Advanced, so the Metrics tab is never shown; and `factory::create_collectors` is reached only from [core/timer.rs:19](src/core/timer.rs#L19), which nothing calls. Editing either changes nothing the user or the renderer can observe. Both are recorded as GL-2 and resolved in Phase 8.7.
 - [ ] 1.6 — Unit test: `overlay_cpu` normalization returns a %-of-one-core value on a known synthetic input.
+- [ ] 1.7 — **S-13b — measure the X-side per-frame cost, per monitor.** On the same temporary `cargo run --release` that AC2/AC3 start, time `Presenter::pre_draw` (the `GetInputFocus` round-trip), `ShmPutImage`, and `CreateGc`/`FreeGc` — **separately for each CRTC**, since a 4096×2160×4 buffer and a 1920×1080×4 buffer are not the same cost. Record `present_ms` per monitor in the receipt. **This belongs here, not in Phase 2** *(round-2 audit)*: Phase 2 stands up neither SHM nor RandR, so a present-path number taken inside the MRC harness would be measured off a path production does not take — a new Mock Trap in the act of closing the old one. Phase 1 already has a real connection.
 
 ### Acceptance criteria (MRC)
 - [ ] **AC1** — `cargo test --release --lib --test performance_tests --test metrics_tests` passes. **Audit (R-11):** not a blanket `cargo test` — `tests/window_integration.rs` maps windows onto the user's live desktop and asserts 1920×1080 at (0,0), which is false on this host (RandR yields 4096×2160 + 1920×1080). Excluded here; quarantined in Phase 3 AC3.
-- [ ] **AC2** — S-03 via **Method M-1** (plan §1.3): run a temporary foreground `cargo run --release` — **not** an install, and without terminating the running overlay (C-06 belongs to Phase 9) — then compare the on-screen `HUD CPU` value against two `/proc/<pid>/stat` samples 300 s apart. Within **±1 percentage point**. Use `pgrep -x matrix-overlay`, never `-f`: `-f` matches cargo invocations and repository paths, and a multi-pid result makes the reading meaningless.
+- [ ] **AC2** — S-03 via **Method M-1** (plan §1.3): run a temporary foreground `cargo run --release` — **not** an install, and without terminating the running overlay (C-06 belongs to Phase 9) — then compare the on-screen `HUD CPU` value against two `/proc/<pid>/stat` samples 300 s apart. Within **±1 percentage point**.
+  **Pid pinning — round-2 audit; this AC was unsatisfiable as first written.** M-1 requires `pgrep -x matrix-overlay` to return exactly one pid, but this AC deliberately leaves the deployed overlay (pid 2462 today) running *and* starts a second process of the same name. `pgrep -x` would return two, and M-1's guard would exit 1 by construction. **Capture the cargo-run child's pid at spawn and pin it** — e.g. `cargo run --release & TESTPID=$!`, or read it from a startup log line the binary already emits — then sample `/proc/$TESTPID/stat` directly. Exclude the deployed instance by its recorded pid, never by a name match over the whole machine. `pgrep -x` remains correct in **Phase 9**, where exactly one instance is running by then.
 - [ ] **AC3** — S-06: the `fps` metric is within **±10%** of an independent 10-second wall-clock count of `Presenter::present` calls (log line or test hook). **Not** a `ps` cross-check — `ps` cannot measure frame rate.
 - [ ] **AC4** — C-02: the user's existing `~/.config/matrix-overlay/config.json` still parses unmodified.
 - [ ] **AC5** — A-01 becomes a measurement rather than an assumption. Record the observed live fps in the receipt. If it is **not** ~1.3 fps, take Branch 1 (plan §2.5) and re-derive the Phase 5–6 frame budget before continuing.
@@ -77,11 +85,12 @@ This phase's deliverable is a **failing** test.
   - [`asd_tests.rs:42-49`](tests/asd_tests.rs#L42-L49) — `test_stability_no_flicker` asserts `config.general.update_ms >= 500`, the *metrics collector* period. The render tick is hard-coded 33 ms at [threads/mod.rs:116](src/core/threads/mod.rs#L116). C-05 is tested green against a clock production does not use. Retarget it at the tick, and at `target_fps` once Phase 5 introduces it.
   - [`asd_tests.rs:53-69`](tests/asd_tests.rs#L53-L69) — `test_layout_predictability` has **every assertion commented out** and iterates an empty body. It cannot fail. Restore the assertions or delete the test; a permanently-green test named for a requirement is worse than no test at all.
   - [`benches/render_bench.rs:17-32`](benches/render_bench.rs#L17-L32) — benches one `FontDescription` and one string through one layout: the same shape as the trap being removed. Label it a **control**, or point it at `RainManager::draw`.
+- [ ] 2.6b — **S-13a — measure the Cairo-side per-frame cost outside the rain draw.** In the same MRC harness, at 4096×2160, time `clear()` (opaque full-surface paint), `rain.update`, and the metrics glow — the last being **six** `show_layout` calls per metric per frame ([drawing.rs:27-39](src/render/layout/drawing.rs#L27-L39): the `passes` loop *plus* a final full-alpha pass). Record `cairo_rest_ms`. **Do not time the present path here** — that is S-13b and it lives in Phase 1.7, because this harness has no X connection, no SHM segment and no RandR (round-2 audit).
 - [ ] 2.7 — **Audit — make A-02 auditable going forward.** The 0.02 ms / 4.8 ms / 692→102 ms measurements behind the font-cache-eviction diagnosis exist only in a session transcript; no file records them. Write the MRC's first red run into the receipt: profile (`--release`), mean ms/frame, the full per-frame series, host CPU, geometry, realism. Do not fabricate a backdated investigation document — record forward from here.
 
 ### Acceptance criteria (MRC)
 - [ ] **AC1** — S-08 (first half): `cargo test --release --test performance_tests test_rain_frame_cost_mrc` **FAILS** with a mean **> 20 ms/frame**. **Audit correction:** the gate is "exceeds the threshold", not "reports ~750 ms" — that figure was measured under the dev profile and may not reproduce under `--release` (`opt-level = "z"`, LTO, `codegen-units = 1`). Record the actual figure under both profiles. A passing result here means the test is not exercising the production path — fix the test, not the threshold.
-- [ ] **AC2** — The control test passes at ~12 ms, confirming the delta is size-churn.
+- [ ] **AC2** — The control test (identical glyph count, single font size) passes its gate under `--release`, confirming the delta is size-churn rather than glyph volume. **Round-2 audit:** do not assert the literal "~12 ms" — that figure was measured under the dev profile and carries the same problem AC1 just shed. Set the control's threshold from its own `--release` run and record both profiles.
 - [ ] **AC3** — The 40-frame series shows **no warm-up convergence** (frame 40 within 15% of frame 1), confirming cache eviction rather than cold start.
 - [ ] **AC4** — R-06: the MRC contains no synthetic glyph loop; it calls `RainManager::draw`.
 
@@ -160,11 +169,13 @@ drawn — Phase 5's domain.
 
 ## Phase 5: Frame Governor
 
-**STATUS: NOT STARTED** — LOE-3 · Resolves F4 · Aligns with concept.md §IV
+**STATUS: NOT STARTED** — LOE-3 · Resolves F4 · Aligns with [docs/pitfalls.md:72](docs/pitfalls.md)
 
 ### Objective
-Fix the frame cap that fails open under load, and bring the refresh rate in line with
-`concept.md` §IV: *"1Hz or 0.5Hz is sufficient. Avoid 60fps animations."*
+Fix the frame cap that fails open under load, and bring the refresh rate in line with the documented
+refresh guidance: *"1Hz or 0.5Hz is sufficient. Avoid 60fps animations."* — [docs/pitfalls.md:72](docs/pitfalls.md).
+**Citation corrected (round-2 audit):** this sentence is **not** in `concept.md` §IV, which states a
+500 ms minimum update interval. Both documents bind; only the attribution was wrong.
 
 ### Tasks
 - [ ] 5.1 — Fix `spawn_tick_thread` in [threads/mod.rs:114-125](src/core/threads/mod.rs#L114-L125). Time blocked in `send()` on the `bounded(1)` channel is currently counted in `elapsed`, so once a frame exceeds 33 ms the thread sleeps 1 ms and immediately re-queues — the cap disappears exactly when it is needed.
@@ -180,7 +191,7 @@ Fix the frame cap that fails open under load, and bring the refresh rate in line
 - [ ] **AC3** — Clamping verified at boundaries: `0` → 1, `9999` → 60.
 - [ ] **AC4** — C-02: existing config without `target_fps` loads and defaults correctly.
 - [ ] **AC5** — **R-03 / C-05 user sign-off (blocking):** rain motion at the new rate must read as smooth and non-strobing. ASD guidance is a hard constraint, not a preference.
-- [ ] **AC6** — **Audit — the budget identity gate (plan §1.3). Blocking.** Compute `(rain_ms + rest_ms) × target_fps × monitors ÷ 10` at the chosen default, using the S-13 figure for `rest_ms` if measured and a recorded estimate otherwise, with `monitors = 2`. It must project **under 3%**. Worked counter-example from the pre-audit draft: S-02's 8 ms ceiling × the proposed default of 10 fps = 8% of one core on the 4K panel alone, before `rest_ms` and before the second monitor — every written gate green, S-04 failed. If the projection exceeds 3%, **lower the default `target_fps` here** (plan §2.5 branch); do not defer the problem to the optional Phase 6.
+- [ ] **AC6** — **Audit — the budget identity gate (plan §1.3). Blocking.** Compute `(rain_ms + cairo_rest_ms + present_ms) × target_fps × monitors ÷ 10` at the chosen default, with `monitors = 2`. **Every term is a measured number by the time this phase runs** — `rain_ms` from the Phase 3/4 MRC, `cairo_rest_ms` from S-13a (task 2.6b), `present_ms` per CRTC from S-13b (task 1.7). The result must project **under 3%**. **Round-2 audit: the earlier "or a recorded estimate otherwise" clause is deleted** — a gate satisfiable by an unmeasured number is Hallucinated Success under a new name, and it is the exact defect class this audit exists to remove. Worked counter-example from the pre-audit draft: S-02's 8 ms ceiling × the proposed default of 10 fps = 8% of one core on the 4K panel alone, before `rest_ms` and before the second monitor — every written gate green, S-04 failed. If the projection exceeds 3%, **lower the default `target_fps` here** (plan §2.5 branch); do not defer the problem to the optional Phase 6.
 
 ### Forward contract to Phases 6 and 7
 Frame cost (Phase 4) × frame rate (Phase 5) is now bounded and tunable, and AC6 has projected it under
@@ -216,14 +227,17 @@ interval but are re-rendered on every frame at whatever `target_fps` dictates.
 
 ### Acceptance criteria (MRC)
 - [ ] **AC1** — Metrics panel re-renders only on value change; verified by an instrumented counter over 100 frames at `update_ms: 2000` — expect ≈ 1 panel render per 2 s, not 1 per frame.
-- [ ] **AC2** — **R-04:** no stale pixels after config change, expose, or resize. This is the failure mode that makes damage rendering dangerous; it must be tested, not assumed.
+- [ ] **AC2** — **R-04:** no stale pixels after config change or expose — and after resize **only if 6.4b took option (a)**. If 6.4b took option (b), this AC instead requires that the deferral is written down and that no code path claims to handle resize. *(Round-2 audit: this AC previously demanded a resize guarantee unconditionally, contradicting 6.4b, which correctly makes resize handling a choice.)* This is the failure mode that makes damage rendering dangerous; it must be tested, not assumed.
 - [ ] **AC3** — **R-05:** no mutex held across any Cairo call. Verify by inspection and by a test that renders while the metrics thread writes concurrently.
 - [ ] **AC4** — Measured CPU improves or holds versus Phase 5. A regression here triggers revert to the Phase 5 commit (§1.7).
 - [ ] **AC5** — S-10: all touched files ≤ 175 lines.
 
-### Forward contract to Phase 7
-The render loop does minimal per-frame work, and a static-content rendering path exists — which is
-precisely what Pulse Mode requires.
+### Forward contract (Phase 6 is a leaf — it contracts to nothing)
+The render loop does minimal per-frame work, and a static-content rendering path exists. **Phase 7
+does not depend on this** *(round-2 audit: this heading still read "to Phase 7", contradicting the
+rewired DAG)* — Pulse Mode's prerequisites are Phase 5's governed interval and the F8 fix, both
+upstream of here. If Phase 6 is abandoned per §2.5, nothing downstream is blocked; the static-content
+path it would have built is a convenience for Phase 7, not a requirement of it.
 
 **Receipt:** `receipts/BUILD_RECEIPTS.md` (repo-root relative; created on first write by Phase 1)
 
@@ -243,7 +257,7 @@ every other value silently draws **nothing**. The mode is not implemented, it is
 ### Tasks
 - [ ] 7.0 — **PREREQUISITE — F8. Blocking; nothing else in this phase can be verified before it.** [main.rs:28](src/core/main.rs#L28) executes `config.cosmetics.rain_mode = "fall".to_string();` unconditionally, immediately after `Config::load()` and with no comment. The user's configured mode is discarded on **every** launch. Remove the line, or gate it behind an explicit debug flag that defaults off. Until this is done, `pipeline.rs:35` can never see `"pulse"`, S-05 cannot be measured, and Phase 8's Minimal preset writes a value the next launch overwrites. Record why the line existed if `git log -S` reveals it; if not, say so.
 - [ ] 7.1 — Implement `rain_mode: "pulse"` as a real branch: static glyph positions with a slow global alpha oscillation, no per-frame physics and no glyph churn.
-- [ ] 7.2 — **C-05 (ASD):** the pulse must be a slow, smooth alpha ramp. `concept.md` §IV requires *"No flashing or blinking elements."* This constraint governs the implementation, not just the review.
+- [ ] 7.2 — **C-05 (ASD):** the pulse must be a slow, smooth alpha ramp. *"No flashing or blinking elements"* — [docs/pitfalls.md:70](docs/pitfalls.md), **not** `concept.md` §IV (round-2 audit citation fix; §IV's contribution is the 500 ms minimum interval). Both bind. This constraint governs the implementation, not just the review.
 - [ ] 7.3 — Reuse the Phase 4 glyph atlas — pulse mode blits the same cached surfaces at a varying alpha.
 - [ ] 7.4 — Make the unhandled-`rain_mode` case explicit: an unknown value must log a warning and fall back to a known mode rather than silently rendering nothing. This is the Ghost Logic guard for the whole setting.
 - [ ] 7.5 — Fix `test_pulse_mode_efficiency` (deferred from task 2.5) to exercise the now-real mode instead of an empty branch.
@@ -334,8 +348,8 @@ prior phase measured a test harness; this one measures reality.
 - [ ] 9.4 — Request user approval, then restart the overlay.
 - [ ] 9.5 — Measure the live process with **Method M-1** (plan §1.3) over a 300 s window at the default preset — *after* the restart in 9.4, so the window reflects the new binary rather than a lifetime average that includes the old one.
 - [ ] 9.6 — Measure again with `rain_mode: "pulse"`, having confirmed via 7.0/AC1b that the mode is actually in effect in-process.
-- [ ] 9.6b — **Audit (S-13) — record the cost breakdown, not just the total.** Instrument one run to separate `rain_ms` from `rest_ms` (clear, `rain.update`, metrics glow, `pre_draw` round-trip, `ShmPutImage`) per monitor. Without this, an S-04 miss has no diagnosis and AC7's halt has nothing to point at.
-- [ ] 9.7 — Cross-check `overlay_cpu` and `fps` on screen against `ps` — closing the loop on the two instruments repaired in Phase 1.
+- [ ] 9.6b — **S-13 confirmation, not first contact** *(round-2 audit)*. `cairo_rest_ms` was measured in Phase 2.6b and `present_ms` per CRTC in Phase 1.7; both already gated Phase 5 AC6. Here, re-measure them on the **deployed** binary and confirm they match the earlier figures within a recorded tolerance. A divergence between the harness numbers and the live ones is itself the diagnosis AC7 needs — it says the gap is environmental, not architectural.
+- [ ] 9.7 — Cross-check the on-screen `HUD CPU` against **Method M-1**, and the on-screen `fps` against a 10 s wall-clock count of `Presenter::present` calls — closing the loop on the two instruments repaired in Phase 1. *(Round-2 audit: this task previously said "against `ps`", the instrument M-1 replaces; and `ps` cannot measure frame rate at all.)*
 - [ ] 9.8 — Record all readings in the receipt, including any criterion that **failed**.
 
 ### Acceptance criteria (MRC)
@@ -345,7 +359,19 @@ prior phase measured a test harness; this one measures reality.
 - [ ] **AC4** — S-03 confirmed live: on-screen `HUD CPU` within ±1pp of Method M-1.
 - [ ] **AC5** — No visual regression versus the pre-remediation overlay; user confirms.
 - [ ] **AC6** — Defect class *Hallucinated Success* / *Sound Effect Execution*: measurements are taken from the **live deployed process**, never from a test harness or a dev build.
-- [ ] **AC7** — **§2.5 halt condition:** if AC1 fails while the MRC is green, **halt the campaign and do not document success.** A gap between MRC-green and live-red proves a second cost centre exists outside the rain path, and re-opens investigation. **Audit — the named suspect list (S-13, F9),** in the order the evidence favours: (1) `rest_ms` — the opaque full-surface `clear()`, `rain.update` running unconditionally even in modes that draw nothing, and the metrics glow, which is **six** `show_layout` calls per metric per frame, not five ([drawing.rs:24-40](src/render/layout/drawing.rs#L24-L40): the pass loop *plus* a final full-alpha pass); (2) the **second monitor** — every per-frame cost is paid twice, and the MRC times one surface; (3) `Presenter::pre_draw`'s synchronous `GetInputFocus` round-trip, once per monitor per frame ([shm.rs:101-112](src/render/engine/presentation/shm.rs#L101-L112)); (4) `CreateGc`/`FreeGc` per present; (5) the `SharedMetrics` mutex held across the entire multi-monitor render ([handlers.rs:48-57](src/core/threads/handlers.rs#L48-L57)). Use 9.6b's breakdown to choose, rather than re-opening a blind investigation.
+- [ ] **AC7** — **§2.5 halt condition:** if AC1 fails while the MRC is green, **halt the campaign and do not document success.** A gap between MRC-green and live-red proves a cost centre outside the rain path.
+
+  **Check the operational suspects first — they explain an *insane* reading, not a merely high one:**
+  1. Method M-1 attached to the wrong pid — a Phase 1 `cargo run` still alive, or a `pgrep` that returned two.
+  2. `target_fps` not actually applied (Ghost Logic repeat — still the 33 ms tick).
+  3. F8 still in place, so what was measured as "Pulse" was the fall renderer.
+
+  **Then the real suspects, ranked by *cost the MRC never saw, paid on both CRTCs* (round-2 audit — this list replaces the earlier unranked one):**
+  1. **`Presenter::present` × 2 monitors.** `GetInputFocus` round-trip plus `ShmPutImage` of a 4096×2160×4 buffer (≈35 MB), then again for 1920×1080 (≈8 MB). Absent from the MRC entirely. This is the floor S-13b exists to name — **check it first**, and compare against the `present_ms` recorded in Phase 1.7.
+  2. **Metrics glow.** [drawing.rs:27-39](src/render/layout/drawing.rs#L27-L39) — six `show_layout` calls per metric per frame, every tick, both windows. Also absent from the MRC. Once F1 is dead this is the next Pango cost centre; compare against `cairo_rest_ms` from Phase 2.6b.
+  3. **Opaque full-surface `clear()` × 2.** A 35 MB write on HDMI-1-0 plus 8 MB on eDP, every frame, before a single glyph is drawn.
+  4. **`rain.update` running when `draw` does not.** [pipeline.rs:33](src/render/engine/pipeline.rs#L33) is **not** behind the `"fall"` gate at line 35 — physics advances even in modes that render nothing. Cheap relative to present, free to check, and it is the Pulse-mode leak.
+  5. **`CreateGc`/`FreeGc` per present, then the `SharedMetrics` lock held across both monitors.** Two X requests and a lock are not a 3-percentage-point miss on their own. Look here only after 1–4 have numbers.
 
 ### Forward contract to Phase 10
 Verified live measurements exist to document — including any failures.
@@ -387,15 +413,15 @@ contributed to this defect surviving.
 
 | Phase | LOE | Depends on | Resolves | Gate | Risk |
 |---|---|---|---|---|---|
-| 1 — Instrumentation Truth | 1 | — | F2, F6 | S-03, S-06 | Low |
-| 2 — Disarm the Mock Trap | 1 | 1 | MT, MT-2 | S-08 (red) | Low |
+| 1 — Instrumentation Truth | 1 | — | F2, F6 | S-03, S-06, **S-13b** | Low |
+| 2 — Disarm the Mock Trap | 1 | 1 | MT, MT-2 | S-08 (red), **S-13a** | Low |
 | 3 — Font Size Bucketing | 2 | 2 | F1 core | S-01 (< 20 ms) | **R-01**, R-11 |
 | 4 — Glyph Atlas | 2 | 3 | F1 complete | S-02 (0 hot-path shapes) | R-02 |
 | 5 — Frame Governor | 3 | 4 | F4 | S-07, **AC6 budget** | **R-03** |
 | 6 — Damage + Mutex | 3 | 5 · *optional* | architecture | AC1–AC5 | **R-04, R-05**, R-12 |
 | 7 — Pulse Mode | 4 | **5** *(not 6)* | Ghost Logic, **F8** | S-05 (< 0.5%) | R-09 |
 | 8 — Wire Presets | 4 | 7 | F5, F7, **GL-2** | S-09 | Low |
-| 9 — Deploy + Verify | 5 | 8 | F3, **F9** | **S-04 — MISSION**, S-12, S-13 | R-08 |
+| 9 — Deploy + Verify | 5 | 8 | F3, **F9** | **S-04 — MISSION**, S-12, S-13 confirm | R-08 |
 | 10 — Documentation | 5 | 9 | recurrence | AC1–AC5 | Low |
 
 **Blocking user gates:** Phase 3 AC4 (Z-depth), Phase 5 AC5 (motion smoothness), Phase 9 (restart approval).

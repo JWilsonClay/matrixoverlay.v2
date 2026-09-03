@@ -398,3 +398,93 @@ The two files, and only those two files, have changed, and:
 When finished, print the accepted/rejected list and a diffstat limited to
 implementation-plan.md and tasks.md.
 ```
+
+AMEND — start Phases 1–2 only after the five doc fixes below; then stop and re-gate before Phase 3.
+
+The revised plan is sound enough to execute the instrument pair. It is not sound enough to walk into Phase 3 on the current Phase 5 AC6 text.
+
+---
+
+### Rebuttals
+
+None. All three rejections hold.
+
+- **R-13:** `threads/mod.rs:22-31` is wait-only. libxcb is built for that split. My original row was marked low-confidence; dropping it was correct.
+- **Item D:** `git show b15cbc0:implementation-plan.md | grep presentation` is empty. Stale path is only `CLAUDE.md:97` / `:119`. Phase 10.6 is the right home.
+- **F-K / factory.rs:** `timer.rs:19` is the only `create_collectors` caller, and nothing calls `timer::`. GL-2 is the stronger statement. Keep it.
+
+The three citation tightenings (six `show_layout`, `shm.rs` at 167/175, label **"HUD CPU"**) are correct.
+
+---
+
+### §3 — S-13 ordering
+
+**Relocate, do not leave it as a single Phase 2 blob.**
+
+`rest_ms` is two different clocks:
+
+| Piece | Needs | Belongs |
+|---|---|---|
+| `clear` + `rain.update` + metrics glow (6× `show_layout`) | The Phase 2 Cairo surface at 4096×2160 | **Phase 2**, next to the MRC |
+| `pre_draw` `GetInputFocus` + `ShmPutImage` + `CreateGc`/`FreeGc`, ×2 monitors | A live X connection | **Phase 1**, on the temporary `cargo run --release` that AC2/AC3 already start |
+
+Phase 2 does not stand up SHM or RandR. Timing present inside the MRC harness would be a new Mock Trap — a present-path number taken off a path production does not take.
+
+Phase 5 AC6 then has **measured** `rain_ms` (MRC) and **measured** `rest_ms` (Phase 1 present + Phase 2 Cairo). Delete the phrase **"or a recorded estimate otherwise"** from Phase 5 AC6. That hatch is Hallucinated Success under a new name. Task 9.6b stays as confirmation, not first contact.
+
+Do not put the Cairo half in Phase 1. Phase 1 has no production-geometry harness and should not grow one.
+
+---
+
+### If Phase 9 AC1 is red and the MRC is green
+
+Replace the five-item list. Rank by “cost the MRC never saw, paid on both CRTCs”:
+
+1. **`Presenter::present` × 2 monitors** — `GetInputFocus` round-trip + `ShmPutImage` of a 4096×2160×4 buffer, then again for 1920×1080. Not in the MRC. This is the floor S-13 exists to name. Check this first.
+2. **Metrics glow** — `drawing.rs:27-39`, six `show_layout` per metric per frame, every tick, both windows. Also not in the MRC. After F1 dies this is the next Pango cost centre.
+3. **Opaque full-surface `clear()` × 2** — 35 MB write on HDMI-1-0 plus 8 MB on eDP, every frame, before a single glyph.
+4. **`rain.update` running when `draw` does not** — `pipeline.rs:32` is not behind the `"fall"` gate. Cheap next to present, free to check, and it is the Pulse-mode leak.
+5. **`CreateGc`/`FreeGc` per present, then the `SharedMetrics` lock across both monitors.** Two X requests and a lock are not a 3-point miss by themselves. Look here only after 1–4 have numbers.
+
+Operational suspects, check before any of the above if the reading looks insane:
+
+- Method M-1 attached to the wrong pid (Phase 1 cargo-run still alive, or `pgrep` returned two).
+- `target_fps` not actually applied (Ghost Logic repeat; still the 33 ms tick).
+- F8 still in place, so a “Pulse” reading is the fall renderer.
+
+---
+
+### What absorption got wrong
+
+Five concrete contradictions. Apply these to `implementation-plan.md` / `tasks.md` before Phase 1 starts. No source edits.
+
+1. **Phase 1 AC2 is unsatisfiable as written.** Method M-1 requires `pgrep -x matrix-overlay` to return exactly one pid. AC2 also forbids killing pid 2462 and starts a second `cargo run --release`, which is another process named `matrix-overlay`. Two pids → AC2 exits 1 by construction. Fix: Phase 1 M-1 takes the cargo-run child pid from the spawn (print it, pin it). Exclude 2462 by recorded pid, not by `pgrep -x` over the whole machine.
+
+2. **Method M-1 was not applied everywhere the old command lived.**
+   - `implementation-plan.md` §1.8 layer 4 still says “`ps`/`top` against the deployed binary. Gates S-04, S-05, S-12.”
+   - §2.7 first Hallucinated Success row still says “S-03 cross-checks against `ps`.”
+   - `tasks.md` 9.7 still says “against `ps`.”
+   S-12 is a `cmp`, not a CPU reading; it does not belong in that layer-4 sentence at all.
+
+3. **The §IV citation correction did not finish.**
+   - Phase 5 header: “Aligns with concept.md §IV”; Phase 5 Objective still quotes *“1Hz or 0.5Hz is sufficient”* as `concept.md` §IV.
+   - Phase 7.2 still quotes `concept.md` §IV for *“No flashing or blinking elements.”*
+   Both phrases are `docs/pitfalls.md:70-72`. §1.1 already says this. The phase text was not updated.
+
+4. **S-02 was restated; two older sentences were not.**
+   - §1.8 MRC block still: `target: < 20 ms/frame (Phase 3) → < 8 ms/frame (Phase 4)`.
+   - §2.3 End State still: rain frame cost `< 8 ms`.
+   S-02 is now “hot-path `show_layout` count = 0.” The 8 ms figure is a receipt metric. Those two lines re-open the Phase 4 threshold move AC1 just closed.
+
+5. **Phase 6 still contracts into Phase 7, and AC2 ignores 6.4b.**
+   - Forward contract under Phase 6 is still titled “to Phase 7.”
+   - 6.6 correctly makes resize conditional on option (a). AC2 still requires “no stale pixels after config change, expose, **or resize**” with no branch.
+   - §1.7 rollback trigger is still “S-01…S-12” — S-13 is missing.
+
+Also small: task 1.1 still says “matches `top` semantics.” The campaign just spent a page explaining that `top` is not M-1. Say “matches Method M-1 (% of one core).”
+
+Phase 2 AC2’s “control passes at ~12 ms” has the same profile problem AC1 just shed. Bind it to `--release` and drop the literal 12.
+
+---
+
+Do those five. Then run Phase 1 (instruments + present-path S-13b on the pinned cargo-run pid) and Phase 2 (red MRC + Cairo S-13a). Stop. Re-derive Phase 5’s default `target_fps` from measured numbers, not from the 10-fps placeholder. Do not open Phase 3 on the old arithmetic.

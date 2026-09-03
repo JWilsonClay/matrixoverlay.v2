@@ -125,7 +125,8 @@ Every criterion below is a command or a reading, not a judgment.
 | **S-10** | Module line limits honored | `wc -l` on every touched file | ≤ **175** lines (concept.md §III) |
 | **S-11** | No config regression | Load the user's existing `config.json` unmodified | Parses without error; `deny_unknown_fields` satisfied |
 | **S-12** | Deployed binary contains the campaign's work | `cmp ~/.local/bin/matrix-overlay target/release/matrix-overlay` after `install.sh`; record the built git sha | Byte-identical to the just-built release binary |
-| **S-13** | Per-frame cost **outside** `RainManager::draw` is bounded and known | Instrumented `Renderer::draw` at production geometry, or a documented per-suspect breakdown | `(rain_ms + rest_ms)` recorded per monitor; feeds the budget identity below |
+| **S-13a** | Cairo-side per-frame cost outside `RainManager::draw` is measured — `clear()`, `rain.update`, metrics glow | Instrumented at 4096×2160 inside the **Phase 2** MRC harness | `cairo_rest_ms` recorded; feeds the budget identity below |
+| **S-13b** | X-side per-frame cost is measured — `pre_draw`'s `GetInputFocus` round-trip, `ShmPutImage`, `CreateGc`/`FreeGc`, **per monitor** | Instrumented on the **Phase 1** temporary `cargo run --release`, against a real X connection and real RandR geometry | `present_ms` recorded **per CRTC**; feeds the budget identity below |
 
 **S-04 is the campaign's definition of done.** Everything else is a means to it.
 
@@ -153,9 +154,18 @@ raw tick values, not only the percentage.
 cpu_pct_of_one_core  ≈  (rain_ms + rest_ms) × target_fps × monitors ÷ 10
 ```
 
-Where `rest_ms` is S-13 (clear + metrics glow + `pre_draw` round-trip + `ShmPutImage`) and `monitors`
-is **2** on this host (4096×2160 HDMI-1-0 + 1920×1080 eDP, both driven by
+Where `rest_ms = cairo_rest_ms (S-13a) + present_ms (S-13b)` and `monitors` is **2** on this host
+(4096×2160 HDMI-1-0 + 1920×1080 eDP, both driven by
 [window/mod.rs:48-83](src/core/window/mod.rs#L48-L83) via RandR).
+
+**`rest_ms` is two different clocks and must be measured in two different places** *(round-2 audit)*.
+The Cairo half (S-13a) needs a production-geometry surface, which the Phase 2 MRC harness builds. The
+X half (S-13b) needs a live X connection, SHM attachment and real RandR output — none of which Phase 2
+stands up. **Timing the present path inside the MRC harness would be a new Mock Trap**: a present-path
+number taken off a path production does not take. S-13b therefore rides the temporary `cargo run
+--release` that Phase 1 already starts for AC2/AC3, where the connection is real.
+
+Both halves are **measured before Phase 5 closes**. Phase 5 AC6 carries no estimate escape hatch.
 
 **This identity is why S-01…S-08 can all pass while S-04 fails.** Worked example with the *written*
 gates: S-02's 8 ms ceiling × Phase 5's proposed default of 10 fps = 80 ms/s = **8% of one core for the
@@ -268,7 +278,7 @@ anything. Red-then-green is the anti-Mock-Trap mechanism.
 | **Config** | Phase 9 backs up `~/.config/matrix-overlay/config.json` to `config.json.pre-remediation`. All new fields are `#[serde(default)]`, so the old config remains loadable by the new binary and vice versa. |
 | **Campaign** | Phases 3–4 deliver the CPU win. Phases 6–8 are additive. If Phase 6 destabilizes, revert to the Phase 5 commit and the campaign still meets S-04. |
 
-**Rollback trigger:** any of S-01…S-12 regressing, or user-observed visual regression at the
+**Rollback trigger:** any of S-01…S-13 regressing, or user-observed visual regression at the
 Phase 3 / Phase 5 sign-off gates.
 
 ## 1.8 Verification Method
@@ -281,8 +291,11 @@ Established during the 2026-09-03 investigation and reproducible without a displ
 GIVEN   RainManager::draw at 4096x2160, realism=4, font_size=16,
         streams primed to steady-state distribution
 WHEN    40 consecutive frames are rendered through the production code path
-THEN    baseline: ~750 ms/frame, flat, no warm-up convergence
-        target:   < 20 ms/frame  (Phase 3)  →  < 8 ms/frame  (Phase 4)
+THEN    baseline: > 20 ms/frame, flat, no warm-up convergence   (dev profile measured ~750 ms;
+                  the --release figure is recorded, not assumed — see "Profile matters" below)
+        target:   < 20 ms/frame  (Phase 3, and this gate does not move again)
+                  Phase 4 adds a STRUCTURAL gate — zero hot-path show_layout calls — not a
+                  tighter millisecond threshold. Any observed 8 ms figure is a receipt metric.
 
 CONTROL The identical glyph count at a single font size costs ~12 ms.
         This control is what proves the cost is size-churn and not glyph volume —
@@ -309,7 +322,9 @@ reason the Phase 9 halt condition (AC7) exists.
 2. **Unit tests** — bucket mapping, atlas key/eviction, governor pacing, `overlay_cpu`
    normalization. Gates S-03, S-07.
 3. **Config fixture test** — loads the user's real `config.json`. Gates S-11.
-4. **Live measurement** — `ps`/`top` against the deployed binary. Gates S-04, S-05, S-12.
+4. **Live measurement** — **Method M-1** against the deployed binary. Gates S-04, S-05. *(Round-2
+   audit: this layer previously read "`ps`/`top`", the two instruments M-1 exists to replace, and
+   listed S-12 — which is a `cmp` of two files, not a CPU reading, and belongs to layer 3.)*
 5. **Self-reported telemetry** — the new `fps` metric, cross-checked against wall clock. Gates S-06.
 6. **User visual sign-off** — Phase 3 (Z-depth) and Phase 5 (motion smoothness). Gates R-01, R-03, C-05.
 
@@ -358,7 +373,7 @@ architecture is the method.
 | Dimension | Now | End State |
 |---|---|---|
 | CPU (live) | 60.7% of a core | < 3% of a core (< 0.5% Pulse) |
-| Rain frame cost | ~750 ms | < 8 ms |
+| Rain frame cost | ~750 ms (dev profile) | < 20 ms, with zero hot-path Pango shaping (S-02) |
 | Self-reported CPU | 3.79% (16× low) | Matches Method M-1 ±1pp |
 | Frame rate | Unknown / inferred | On-screen metric, ±10% accurate |
 | Frame cap | Fails open under load | Holds at configured interval |
@@ -446,7 +461,7 @@ Named per the global failure vocabulary. Each has a specific countermeasure in t
 |---|---|---|
 | **Mock Trap** | `test_render_optimization_bench` passed green for months while measuring the one font-size case production never takes | Phase 2 MRC must go **red before** Phase 3 and green after (S-08); R-06 forbids synthetic loops |
 | **Ghost Logic** | `perf_preset` field + three GUI buttons wired to nothing; Pulse Mode described in `concept.md`, absent from `pipeline.rs` | Phases 7–8 resolve by implementation; §2.5 permits resolution by deletion — never by leaving them |
-| **Hallucinated Success** | Declaring the CPU fixed while measuring with a gauge that reads 16× low | Phase 1 precedes all fixes; S-03 cross-checks against `ps` |
+| **Hallucinated Success** | Declaring the CPU fixed while measuring with a gauge that reads 16× low | Phase 1 precedes all fixes; S-03 cross-checks against **Method M-1** (§1.3) — never `ps -o pcpu`, which is the lifetime average that would report the *old* cost of a fixed-but-unrestarted process |
 | **Sound Effect Execution** | A green MRC on a binary that was never deployed | S-12 checks binary mtime against HEAD; Phase 9 measures the *live* process |
 | **Context Erosion** | A 10-phase campaign drifting from the CPU mission into architecture for its own sake | §2.5 sequel makes Phase 6 abandonable; S-04 is declared the single definition of done |
 | **Mock Trap** *(2nd instance)* | `test_stability_no_flicker` asserts `update_ms >= 500` — the metrics collector period — while the render tick is hard-coded 33 ms, so C-05 is "tested" green against a clock production does not use. `test_layout_predictability` has every assertion commented out and can never fail. `render_bench.rs` benches one `FontDescription` and one string | Task 2.5 extended to `asd_tests.rs` and `benches/render_bench.rs`; the flicker test retargets the tick / `target_fps`; the empty test is restored or deleted, never left green |
@@ -506,6 +521,45 @@ difference between a gap that was closed and a claim that did not survive.
 | "Amend every remaining flat-filename reference to `presentation.rs` in `implementation-plan.md`" | **No such reference existed.** Before this revision, neither planning document mentioned `presentation` in any form; there was nothing to amend. The stale path is only in `CLAUDE.md:97` and `CLAUDE.md:119`, which Phase 10.6 now corrects. *(The name appears in these documents from this revision onward — in this row and in Phase 10.6 — so re-running the command below will now match. Check `git show b15cbc0:implementation-plan.md` to reproduce the original result.)* | At audit time: `grep -n presentation implementation-plan.md tasks.md` → no hits |
 | Proposed **R-13**: shared `xcb::Connection` used concurrently by the event thread and the render thread is a data-race risk | **Not a defect.** libxcb is thread-safe by design — a blocking `wait_for_event()` on one thread while another issues requests is XCB's intended usage model and a principal reason it exists rather than Xlib. The `xcb` crate's `Connection` is `Send + Sync`. No R-13 added. | `threads/mod.rs:22-31` (event thread calls only `wait_for_event`) vs `:61-72` (requests) |
 | "`manager.rs` calls only `dispatch::init_collectors`, not `factory::create_collectors`" — implying `factory.rs` is dead | **Half right, absorbed differently.** `factory::create_collectors` *is* called — by `src/core/timer.rs:19`. But `core/timer.rs` has no callers itself, so `factory.rs` is reachable only through dead code. Recorded as Ghost Logic (GL-2), which is stronger than the original claim. | `grep -rn create_collectors src/`; `grep -rn 'timer::' src/` → no callers |
+
+### Round 2 — verdict AMEND, absorbed 2026-09-03
+
+The auditor reviewed the absorption and returned **AMEND**: execute Phases 1–2 only, after five
+document fixes, then stop and re-gate before Phase 3. All three rejections above were sustained on
+review; no finding was reinstated. The five contradictions it found in the absorption itself, all
+verified and fixed:
+
+| # | Contradiction the absorption introduced or left | Fix |
+|---|---|---|
+| 1 | **Phase 1 AC2 was unsatisfiable.** M-1 demands `pgrep -x` return exactly one pid, while the AC deliberately leaves the deployed overlay running *and* starts a second process of the same name — two pids, guard exits 1 by construction | Pin the cargo-run child pid at spawn; exclude the deployed instance by recorded pid. `pgrep -x` stays correct in Phase 9, where only one instance runs |
+| 2 | **M-1 was not propagated everywhere the old command lived** — §1.8 layer 4 still read "`ps`/`top`" and wrongly listed S-12 (a `cmp`, not a CPU reading); §2.7 still read "cross-checks against `ps`"; task 9.7 still read "against `ps`" | All three rewritten to M-1; S-12 moved out of the live-measurement layer |
+| 3 | **The §IV citation fix stopped at §1.1 and C-05** — Phase 5's header and objective still attributed the 1Hz line to `concept.md` §IV, and task 7.2 still attributed "No flashing or blinking elements" to it | Both retargeted to [docs/pitfalls.md:70-72](docs/pitfalls.md) |
+| 4 | **S-02 was restated as a structural gate but two older sentences still asserted 8 ms** — §1.8's MRC target line and §2.3's End State row — re-opening the Phase 4 threshold move that Phase 4 AC1 had just closed | Both rewritten; the 8 ms figure is now explicitly a receipt metric |
+| 5 | **Phase 6 still contracted into Phase 7**, contradicting the rewired DAG; its AC2 demanded a resize guarantee unconditionally, contradicting 6.4b which makes resize handling a choice; §1.7's rollback trigger still read S-01…S-12, omitting S-13 | Phase 6 declared a leaf; AC2 made conditional on 6.4b's branch; rollback trigger extended to S-13 |
+
+Smaller: task 1.1 still said "matches `top` semantics" one page after establishing that `top` is not
+M-1; and Phase 2 AC2 asserted a literal "~12 ms" for the control test, carrying the same dev-profile
+problem AC1 had just shed. Both fixed.
+
+**S-13 was split rather than relocated wholesale.** The proposal was to move it from Phase 9 into
+Phase 2. The auditor's counter — accepted — is that `rest_ms` is two different clocks and Phase 2 can
+only measure one of them. Phase 2 has a production-geometry Cairo surface but no X connection, no SHM
+segment and no RandR, so timing the present path there would be a present-path number taken off a path
+production does not take: **a new Mock Trap created in the act of closing the old one.** Hence
+**S-13a** (Cairo: `clear`, `rain.update`, glow) in Phase 2.6b, and **S-13b** (X: `GetInputFocus`
+round-trip, `ShmPutImage`, `CreateGc`/`FreeGc`, per CRTC) in Phase 1.7, on the live temporary run
+Phase 1 already starts. Phase 5 AC6's *"or a recorded estimate otherwise"* escape hatch is deleted —
+every term of the budget identity is a measured number before that gate can close.
+
+**Phase 9 AC7's suspect list was replaced with a ranked one**, ordered by *cost the MRC never saw,
+paid on both CRTCs*: present × 2 monitors first, then the six-call metrics glow, then the opaque
+double `clear()`, then `rain.update` running outside the `"fall"` gate ([pipeline.rs:33](src/render/engine/pipeline.rs#L33)
+is not behind the check at line 35 — that is the Pulse-mode leak), and only then the per-present GC
+churn and the metrics lock. Three operational suspects — wrong pid, `target_fps` not applied, F8 still
+in place — are checked first, because they explain an *absurd* reading rather than a merely high one.
+
+**Execution scope is now gated in `tasks.md`:** Phases 1 and 2 only, then stop. Phase 3 may not open
+on the pre-audit arithmetic.
 
 ### Corrected in passing
 
