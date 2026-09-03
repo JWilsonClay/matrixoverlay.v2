@@ -488,3 +488,26 @@ Phase 2 AC2’s “control passes at ~12 ms” has the same profile problem AC1 
 ---
 
 Do those five. Then run Phase 1 (instruments + present-path S-13b on the pinned cargo-run pid) and Phase 2 (red MRC + Cairo S-13a). Stop. Re-derive Phase 5’s default `target_fps` from measured numbers, not from the 10-fps placeholder. Do not open Phase 3 on the old arithmetic.
+
+---
+
+**GO.** Open Phase 1.
+
+**§2 — keep S-13b in the Phase 1 build.** Do not split it. Wall-clock around `GetInputFocus` / `ShmPutImage` / `CreateGc` does not read `overlay_cpu` or the fps atomic; a fault in 1.1 or 1.4 cannot invent a present-path number. A timing-only binary is a third artifact that still needs the same hooks and a second live run. One constraint on the implementation: accumulate internally and print a summary. Do not log per present — that is a new cost centre on the path being measured.
+
+**Stop condition — F1 is the wrong root cause, not “re-derive the arithmetic,” if any one of these three lands:**
+
+1. **`--release` MRC mean ≤ 20 ms/frame** on a test that still calls production `RainManager::draw` with varying sizes at 4096×2160 (R-06 holds). Then the 750 ms figure was a dev-profile artifact. Phase 3 has nothing to fix that explains 61%. Do not open it. Re-center on `present_ms × fps × 2`.
+2. **MRC mean and single-size control within 20% of each other under `--release`.** A-02 is false even if both are slow. Cost is glyph volume or fill, not font-cache eviction. Bucketing will not buy the campaign.
+3. **Phase 1 live fps ≥ 15** (frames finishing inside the 33 ms tick) **and** `(present_ms_hdmi + present_ms_edp) × fps ÷ 10 ≥ 40` already. Present × rate × two CRTCs is the 61%. F1 is at most a contributor.
+
+If the MRC stays **> 20 ms**, the control is **several times cheaper**, and live fps is **~1–2**, F1 stands. Take the measured numbers into the Phase 5 identity and continue.
+
+**Diff.** No finding was weakened. Four leftovers, none blocking Phase 1:
+
+- §2.7 Sound Effect row still says S-12 is “mtime against HEAD.” S-12 is `cmp`.
+- §1.8 CONTROL still says “costs ~12 ms.”
+- §2.4 LOE-3 still says “aligned to `concept.md` §IV”; §2.6 theme 8 still pins “1Hz” on §IV.
+- S-01 and Phase 3 AC1 still demand “≥ 40× from ~750 ms.” If the release MRC is 80 ms, that gate is 2 ms and unsatisfiable. Re-gate item, not a Phase 1 hold.
+
+**Phase 1 execution note:** do not use `cargo run --release & TESTPID=$!`. That pins cargo, not the overlay. Build first, run `target/release/matrix-overlay` directly, or parse the binary pid from a startup log / cargo’s children. Sample `/proc/$TESTPID/stat` on that pid.

@@ -113,7 +113,7 @@ Every criterion below is a command or a reading, not a judgment.
 
 | # | Criterion | Measurement | Gate |
 |---|---|---|---|
-| **S-01** | Rain frame cost collapses | MRC test (§1.8), `cargo test --release`, against production `RainManager::draw` | ≥ 40× faster than baseline; **< 20 ms/frame** at 4096×2160, realism=4 |
+| **S-01** | Rain frame cost collapses | MRC test (§1.8), `cargo test --release`, against production `RainManager::draw` | **< 20 ms/frame** at 4096×2160, realism=4. *Round-3: the absolute gate is the binding one. The former "≥ 40× faster than baseline" is descriptive only and is computed against the **measured `--release` baseline** recorded in Phase 2, never against the dev-profile ~750 ms figure — if the release baseline is 80 ms, "40×" would demand 2 ms and be unsatisfiable by construction.* |
 | **S-02** | Glyph atlas removes Pango from hot path | New assertion, post-Phase 4: zero `show_layout` calls on the rain path (atlas blit only). Observed ms recorded in the receipt, **not** a moved threshold on the S-01 test | Hot-path Pango shaping count = **0** |
 | **S-03** | `overlay_cpu` matches an external CPU reading | **Method M-1** (below) vs the on-screen `overlay_cpu` value | Within **±1 percentage point** |
 | **S-04** | Live process meets concept.md §III | **Method M-1** on the deployed binary, 300 s window, after a known restart | **< 3% of one core** |
@@ -199,7 +199,8 @@ must evaluate this identity before closing.
 - **A-02** — Pango font-cache eviction is the mechanism. Evidence: 0.02 ms for 239
   `set_font_description` calls in isolation, versus ~4.8 ms per size change when a `show_layout`
   follows, versus a drop from 692 ms → 102 ms on the identical workload when live layout references
-  are held. Falsifiable by the Phase 2 MRC.
+  are held. Falsifiable by the Phase 2 MRC — and **§1.9 now states exactly which readings falsify it**,
+  so a disappointing result cannot be absorbed as "needs re-deriving".
 - **A-03** — 6–16 size buckets preserve perceived Z-depth. **Subjective; user-verified at Phase 3.**
 - **A-04** — Glyph set is bounded (Katakana `0x30A1..=0x30F6` = 86 glyphs). At 16 buckets the atlas
   holds ≤ 1,376 small surfaces. Assumed to fit comfortably in memory; measured at Phase 4.
@@ -297,7 +298,9 @@ THEN    baseline: > 20 ms/frame, flat, no warm-up convergence   (dev profile mea
                   Phase 4 adds a STRUCTURAL gate — zero hot-path show_layout calls — not a
                   tighter millisecond threshold. Any observed 8 ms figure is a receipt metric.
 
-CONTROL The identical glyph count at a single font size costs ~12 ms.
+CONTROL The identical glyph count at a single font size. Its cost is RECORDED from its own
+        --release run, not asserted at a literal figure — the ~12 ms originally quoted here
+        was a dev-profile measurement (round-3 audit).
         This control is what proves the cost is size-churn and not glyph volume —
         and it is precisely the control the existing Mock Trap measured *instead of*
         the real path.
@@ -337,6 +340,30 @@ reason the Phase 9 halt condition (AC7) exists.
 >
 > **Every performance assertion in this campaign must call production code with production-shaped
 > inputs.** Where that is impossible, the test is labeled a *control*, never a *validation*.
+
+## 1.9 Falsification Criteria — when F1 is the *wrong* root cause
+
+Every other gate in this plan answers "did the fix work?". None of them answered "was the diagnosis
+right?" — A-02 was marked *falsifiable by the Phase 2 MRC*, but nothing said what a falsifying reading
+would look like, which meant any disappointing number could be absorbed as "re-derive the arithmetic"
+and the campaign would grind on. These criteria close that. **They are evaluated at the mandatory
+Phase 2/3 stop, before Phase 3 is permitted to open.**
+
+**F1 (font-cache eviction) is the wrong root cause — halt and re-center — if any ONE of these lands:**
+
+| # | Reading | Threshold | What it means |
+|:--:|---|---|---|
+| **X-1** | `--release` MRC mean, on a test that still calls production `RainManager::draw` with **varying** sizes at 4096×2160 (R-06 must hold) | **≤ 20 ms/frame** | The ~750 ms figure was a dev-profile artifact. Phase 3 has nothing to fix that could explain 61%. **Do not open Phase 3.** Re-center on `present_ms × fps × 2`. |
+| **X-2** | `--release` MRC mean vs the single-size control | **within 20% of each other** | A-02 is false *even if both are slow*. The cost is glyph volume or fill rate, not font-cache eviction. Bucketing and the atlas buy the campaign nothing. |
+| **X-3** | Phase 1 live `fps` **and** the present budget | `fps ≥ 15` (frames finishing inside the 33 ms tick) **and** `(present_ms_hdmi + present_ms_edp) × fps ÷ 10 ≥ 40` | Present × rate × two CRTCs already accounts for the 61%. F1 is at most a contributor, not the root cause. |
+
+**F1 stands, and the campaign continues into Phase 3, only if all three hold:** the `--release` MRC is
+**> 20 ms**, the single-size control is **several times cheaper** than it, and live `fps` is **~1–2**.
+Carry the measured numbers forward into the Phase 5 budget identity (§1.3) and proceed.
+
+A falsified F1 does **not** invalidate the campaign's instrumentation work. Phases 1 and 2 stand: the
+`overlay_cpu` fix, the `fps` metric, the disarmed Mock Trap, S-13a and S-13b are all independently
+valuable and independently verified. What changes is which cost centre Phases 3 onward attack.
 
 ---
 
@@ -394,7 +421,8 @@ path entirely. Delivers F1. Exit: S-01 and S-02 pass; MRC is green.
 → *Forward contract to LOE-3:* per-frame render cost is bounded and known.
 
 **LOE-3 — Temporal Control** *(Phases 5, 6)*
-Fix the tick thread's fail-open cap, add a real frame governor aligned to `concept.md` §IV, then
+Fix the tick thread's fail-open cap, add a real frame governor aligned to the documented refresh
+guidance at [docs/pitfalls.md:72](docs/pitfalls.md), then
 remove per-frame work that need not happen per frame (damage tracking, mutex-free metric snapshot).
 Delivers F4. Exit: S-07 passes; frame cost × frame rate lands inside budget.
 → *Forward contract to LOE-4:* a governed loop with density and rate as tunable inputs.
@@ -422,6 +450,7 @@ the next agent re-learning this.
 | `perf_preset` proves genuinely unwanted | Phase 8 branch: **remove** the buttons and the field rather than wire them. Ghost Logic is resolved by deletion or by implementation — never by leaving it. |
 | The budget identity (§1.3) projects the default preset **above 3%** at Phase 5's chosen `target_fps` | **Lower the default `target_fps` before Phase 9** — do not proceed hoping Phase 6 recovers the difference. Phase 6 is optional by §2.5; the mission is not. `concept.md`'s companion guidance (pitfalls.md:72) already sanctions 1Hz. |
 | Phase 7 is reached and F8 (`main.rs:28`) has not been fixed | **Halt Phase 7.** S-05 cannot be measured while startup overwrites `rain_mode`; a "passing" Pulse Mode measured against the fall renderer is Hallucinated Success. |
+| Any of §1.9's X-1, X-2 or X-3 lands at the Phase 2/3 stop | **F1 is the wrong root cause. Halt; do not open Phase 3.** Keep Phases 1–2 — instruments, MRC, S-13a/S-13b are all independently valuable — and re-center the campaign on whatever S-13 named. This is a *re-diagnosis*, not a failure of the work already done. |
 | S-13 shows `rest_ms` dominates `rain_ms` after Phase 4 | The rain path is no longer the cost centre. Re-prioritize: the present path, the glow passes, and the `SharedMetrics` lock (Phase 6.1/6.3) become primary rather than optional. Record the reversal explicitly. |
 
 ## 2.6 Common Developer Themes — Alignment
@@ -451,7 +480,8 @@ Mandatory per Divergence #1. How this plan honors each:
    The one new allocation (the atlas) is explicitly measured against a cap at Phase 4 (A-04, R-02).
 8. **Future-Proofing** — The atlas is keyed by `(char, bucket)`, so a future non-Katakana glyph set
    or a variable font size needs no structural change. The governor exposes `target_fps` as config,
-   so §IV's "1Hz is sufficient" becomes a user setting rather than a recompile.
+   so the documented "1Hz is sufficient" guidance ([docs/pitfalls.md:72](docs/pitfalls.md)) becomes a
+   user setting rather than a recompile.
 
 ## 2.7 Failure Patterns Under Active Guard
 
@@ -462,7 +492,7 @@ Named per the global failure vocabulary. Each has a specific countermeasure in t
 | **Mock Trap** | `test_render_optimization_bench` passed green for months while measuring the one font-size case production never takes | Phase 2 MRC must go **red before** Phase 3 and green after (S-08); R-06 forbids synthetic loops |
 | **Ghost Logic** | `perf_preset` field + three GUI buttons wired to nothing; Pulse Mode described in `concept.md`, absent from `pipeline.rs` | Phases 7–8 resolve by implementation; §2.5 permits resolution by deletion — never by leaving them |
 | **Hallucinated Success** | Declaring the CPU fixed while measuring with a gauge that reads 16× low | Phase 1 precedes all fixes; S-03 cross-checks against **Method M-1** (§1.3) — never `ps -o pcpu`, which is the lifetime average that would report the *old* cost of a fixed-but-unrestarted process |
-| **Sound Effect Execution** | A green MRC on a binary that was never deployed | S-12 checks binary mtime against HEAD; Phase 9 measures the *live* process |
+| **Sound Effect Execution** | A green MRC on a binary that was never deployed | S-12 `cmp`s the installed file against the just-built `target/release/matrix-overlay` and records the built git sha; Phase 9 measures the *live* process. *(Round-3: this row still described the superseded mtime-vs-HEAD check, which proves only that some file is newer than some commit date.)* |
 | **Context Erosion** | A 10-phase campaign drifting from the CPU mission into architecture for its own sake | §2.5 sequel makes Phase 6 abandonable; S-04 is declared the single definition of done |
 | **Mock Trap** *(2nd instance)* | `test_stability_no_flicker` asserts `update_ms >= 500` — the metrics collector period — while the render tick is hard-coded 33 ms, so C-05 is "tested" green against a clock production does not use. `test_layout_predictability` has every assertion commented out and can never fail. `render_bench.rs` benches one `FontDescription` and one string | Task 2.5 extended to `asd_tests.rs` and `benches/render_bench.rs`; the flicker test retargets the tick / `target_fps`; the empty test is restored or deleted, never left green |
 | **Ghost Logic** *(2nd instance)* | `show_monitor_label` is written by the GUI and read by nothing; `build_logging_enabled` is defaulted and read by nothing; `core/timer.rs` is declared in `core/mod.rs:13` and called by nothing — and is the *only* caller of `factory::create_collectors` | Phase 8 Ghost Logic sweep: wire or delete, no third option. The same rule that governs `perf_preset` governs these |
@@ -560,6 +590,46 @@ in place — are checked first, because they explain an *absurd* reading rather 
 
 **Execution scope is now gated in `tasks.md`:** Phases 1 and 2 only, then stop. Phase 3 may not open
 on the pre-audit arithmetic.
+
+### Round 3 — verdict GO, absorbed 2026-09-03
+
+The auditor returned **GO** on opening Phase 1, with four non-blocking leftovers, one execution-level
+correction, and the falsification criteria that were the open question.
+
+**The execution correction was a live defect in the round-2 fix itself.** Phase 1 AC2's pid-pinning
+remedy suggested `cargo run --release & TESTPID=$!`. `$!` is **cargo's** pid — cargo spawns the
+overlay as a child — so `/proc/$!/stat` would have sampled cargo sitting idle at ~0% and AC2 would
+have passed falsely. A Hallucinated Success generator inside the AC written to prevent one. Corrected
+to `cargo build --release` followed by running `./target/release/matrix-overlay` directly, with the
+log-line and child-walk fallbacks named and `$!` explicitly ruled out.
+
+Four leftovers, all verified and fixed: §2.7's Sound Effect row still described S-12 as an mtime
+check after S-12 became a `cmp`; §1.8's CONTROL line still asserted the dev-profile "~12 ms"; §2.4
+LOE-3 and §2.6 theme 8 still pinned the 1Hz guidance on `concept.md` §IV; and S-01 / Phase 3 AC1 still
+demanded "≥ 40× from ~750 ms", which sets an implicit 2 ms target if the `--release` baseline lands at
+80 ms — unsatisfiable for reasons unrelated to the fix. The absolute 20 ms gate is now the binding
+one and the ratio is descriptive, computed against the measured release baseline.
+
+**S-13b stays in the Phase 1 build.** The coupling was raised explicitly and judged acceptable: wall
+clock around `GetInputFocus` / `ShmPutImage` / `CreateGc` reads neither `overlay_cpu` nor the fps
+atomic, so a fault in task 1.1 or 1.4 cannot invent a present-path number, and a timing-only binary
+would be a third artifact needing the same hooks and a second live run. One constraint added:
+**accumulate internally, print one summary at exit — never log per present**, since a log line on the
+path being measured is a new cost centre inside the measurement.
+
+**§1.9 Falsification Criteria is the substantive addition** and closes the gap both prior rounds left.
+Every other gate in this plan asked "did the fix work?"; none asked "was the diagnosis right?" A-02
+was marked falsifiable by the Phase 2 MRC, but nothing said what a falsifying reading *looked* like —
+so any disappointing number could have been absorbed as "re-derive the arithmetic" while the campaign
+ground on against the wrong cost centre. Three named readings now say otherwise: **X-1** (a
+`--release` MRC at ≤ 20 ms means the 750 ms was a dev-profile artifact), **X-2** (MRC and single-size
+control within 20% means A-02 is false even if both are slow — the cost is glyph volume or fill, not
+eviction), and **X-3** (live `fps ≥ 15` with present × rate × 2 CRTCs already ≥ 40% means F1 is at
+most a contributor). Phase 1 AC6 answers X-3; Phase 2 AC5 answers X-1 and X-2; either landing halts
+the campaign at the Phase 2/3 stop. A falsified F1 does not invalidate Phases 1–2 — the instruments,
+the disarmed Mock Trap and both S-13 halves stand on their own.
+
+**Status: Phase 1 is authorized to open.** Scope remains Phases 1 and 2, then the mandatory stop.
 
 ### Corrected in passing
 
