@@ -663,3 +663,470 @@ pid_rule: cargo build --release && ./target/release/matrix-overlay & TESTPID=$!
 forbidden: cargo run
 m1_phase_1: sample /proc/$TESTPID/stat  # not pgrep -x
 ```
+
+---
+
+```yaml
+round: 6
+against: "082cd7b"
+phase_2: AUTHORIZED
+do_not: [open_phase_3, jump_to_phase_5]
+doc_first:
+  - "§1.9 cell for fps≥15 ∧ present_budget<40"
+  - "X-LIVE rider, threshold 25 ms"
+  - "Phase 1 AC1 drop --test metrics_tests"
+then: build_MRC
+then: "§1.9 stop with rain_ms, cairo_rest_ms, AC0, X-LIVE, X-1, X-2"
+```
+
+```yaml
+D-1:
+  verdict: F1_STANDS_REDERIVE
+  new_enum: false
+  new_falsifier: false
+  cell: "fps >= 15 AND present_budget_pct < 40"
+  meaning: >
+    Loop is at the hardcoded 33 ms tick. Present is cheap (4.85%).
+    Cost is per-frame cairo work × rate — the bin F1 would occupy IF
+    it is expensive. This cell does not classify F1. It falsifies A-01
+    and forces a Phase 5 re-derive at the measured 30.2 fps.
+  receipt: F1_STANDS_REDERIVE
+  §1.9_sentence: >
+    fps ≥ 15 ∧ present_budget < 40 → Branch 1 at the measured rate;
+    X-3 does not fire.
+
+D-2:
+  ac0_dev_window: keep_[500,900]
+  add: X-LIVE
+  threshold_ms: 25
+  rule: >
+    After the --release MRC exists: if mrc.release.mean_ms > 25
+    → verdict UNCALIBRATED_VS_LIVE
+    → do not honor X-1
+    → do not open Phase 3
+    → fix the test, do not move the threshold
+  why_25: >
+    MRC times one-surface RainManager::draw. Live tick is 19.71 ms
+    paying present + second monitor + clear + update + glow.
+    A 25+ ms 4K draw cannot coexist with that tick. 18.11 is the
+    wrong quantity (two surfaces + rest). 750 ms in a 30.2 fps
+    process is physically impossible — that number was the 1.3 fps
+    inference talking to itself.
+  note: >
+    750 ms vs 18.11 ms are not the same measurement
+    (dev / draw-only / 4K vs release / full tick / two CRTCs).
+    AC0 still tests investigation-identity. X-LIVE tests live-identity.
+
+D-3:
+  resequence_now: false
+  s04_lever: phase_5
+  arithmetic: "19.71 * 1 / 10 = 1.97%  (< 3%)"
+  after_phase_2:
+    X-1_or_already_under_20: "skip 3–4; Phase 5 next; 3–4 become Extreme-preset quality (same sequel shape as Phase 6)"
+    X-2: "F1 wrong mechanism; Phase 5 next"
+    X-LIVE: "MRC is not the live path; fix the test; do not open 3"
+    slow_and_agrees_with_live: "cannot occur given 19.71 unless the 19.71 reading is wrong"
+  why_not_jump: >
+    Original order assumed 1.3 fps × 750 ms. Both limbs are dead.
+    Temporal control is the S-04 lever. Cheap frames still matter
+    for Extreme@30 fps — that is sequel, not the mission gate.
+    Do not skip Phase 2: you would set target_fps without rain_ms
+    vs cairo_rest_ms. F4 is latent, not live — frames already beat
+    the 33 ms cap (threads/mod.rs:116-122).
+  do_not_open_phase_3_on: pre_measurement_DAG
+
+D-4:
+  action: quarantine
+  amend: "Phase 1 AC1 (and Phase 3 AC3) drop --test metrics_tests"
+  record: MT-3
+  reason: "NvidiaSmiCollector::new_with_command does not exist; file has never compiled; same class as R-11"
+  fix_nvidiasmi: false
+  blocks_phase_2: false
+
+D-5:
+  reject: [a_mutate_config, c_leave_unverified_forever]
+  ac2: "accept M-1 59.54% as the CPU number; HUD cross-check = screenshot or 30 s env dump; never touch config.json"
+  ac3: "wall-clock 30.2 is the fps"
+  follow_up: >
+    Always-register FpsCollector in dispatch.rs (instrument, not a
+    user metric). Five lines. Ride the Phase 2 commit or a 1.8
+    patch. Then a 30 s rerun closes the metric side of AC3.
+    Do not hold Phase 2 for it.
+```
+
+```yaml
+identity_closed: "19.71 * 30.2 / 10 = 59.52  ==  M-1 59.54"
+a01: FALSIFIED
+x3: false
+f4_live: false
+phase_2_authorized: true
+commit: "082cd7b"
+```
+
+---
+
+# AGENT PROMPT — Phase 2 Rework after X-LIVE
+# Campaign: 20260903-matrixoverlay-render-remediation
+# Against: f5dc741   Branch: refactor/matrixoverlay.v2
+# From: Grok Round 7 adjudication
+# Scope: Phase 2 rework + plan/task document patches. NO Phase 3. NO Phase 5 code.
+
+```yaml
+verdict:
+  phase_2: HALTED_REWORK
+  phase_3: BLOCKED
+  phase_5_code: NOT_THIS_PASS
+  s04_lever: phase_5          # 20.64 ms/tick × 1 fps / 10 = 2.06%
+  f1_lab: true                # MRC 612.5 vs control 8.55 = 72× — F1 reproduced in cargo-test
+  f1_live: false              # production rain.draw 4K 10.00 vs control 8.55 = 1.17×
+  identity_closes: true       # 19.43 accounted vs 20.64 observed (6%)
+```
+
+Do not implement glyph atlas, bucketing, frame governor, or Pulse Mode.
+Do not retune AC0's [500, 900] window.
+Do not open Phase 3.
+
+---
+
+## 0. Adjudication (Q1–Q5) — bind these, do not re-argue them
+
+```yaml
+Q1:
+  instrument: surviving_show_layout_count   # glyphs that PASS the clip guard, not streams×10
+  config_source: pinned_literals            # do NOT read ~/.config in the test
+  pin:
+    rain_speed: 0.1                         # live; default is 1.0 — this was an R-06 miss
+    realism: 4
+    font_size: 16
+    rain_mode: "fall"
+    # copy matrix_brightness from the live config.json INTO a literal and record the value in the receipt
+  also:
+    - rain.update between MRC frames (production does; current harness does not)
+    - fix the harness comment that cites production rain.draw as 3.95 ms — receipt 10.0030 wins
+  if_glyph_counts_match_and_cost_still_diverges:
+    next: MRC-B (one ImageSurface reused, Context fresh per frame, opaque clear per frame)
+    not: more priming
+
+Q2:
+  x_live: RATIO
+  trip: mrc.release.mean_ms / in_process_rain_draw_4k_ms  >=  3.0
+  backstop_ms: 25                            # still trips if in-process figure is missing
+  current: 612.530 / 10.0030 = 61.2          # trips either form
+  do_not_retune_25_after_phase_3
+
+Q3:
+  phases_3_and_4: DEMOTED                    # Extreme@30 quality work, same sequel shape as Phase 6
+  not: mission_critical
+  not: dropped
+  next_mission_phase_after_this_rework: 5    # governor + target_fps; S-04 = 2.06% at 1 fps
+  phase_3_reentry_only_if:
+    live_rain_draw_4k / live_single_size_control_4k  >=  3.0
+    both_in_process: true                    # NOT vs cargo-test control 8.55 (Harper)
+  today: 10.00 / ~8.6 ≈ 1.17                 # would NOT re-open Phase 3 even after MRC agrees
+
+Q4:
+  clear_UNCALIBRATED_VS_LIVE_when:
+    - reworked mrc.release.mean_ms / in_process_rain_draw_4k_ms  <  3.0
+    - surviving glyph counts explained (ratio recorded)
+  that_clears: Phase 2 completion
+  that_does_not_clear: Phase 3               # Phase 3 still needs the live ≥3× control test
+  ac0_500_900: RETIRED_AS_LIVE_GATE
+    keep_as: investigation-identity record
+    expect: reworked MRC ~10 ms will FAIL [500,900] — that is correct, do not chase it
+
+Q5_missed:
+  - S-13a glow never recorded (drawing.rs:27-39, 6× show_layout). Fill or mark deferred in receipt.
+  - pipeline.rs rain.update is NOT behind the "fall" gate — Pulse leak, still live. Do not fix in this pass; record.
+  - F8 still live: src/core/main.rs clobber `config.cosmetics.rain_mode = "fall"` after Config::load(). Do not fix in this pass; record.
+  - Phase 5 AC6 may consume LIVE terms now (rain_4k=10.003, rain_1080=4.288, clear_x2=3.29, present_x2=1.85). Document only.
+```
+
+---
+
+## 1. Standing rules (unchanged)
+
+- Method M-1 only for live CPU. Never `ps -o pcpu`. Never `pgrep -f`.
+- Launch: `cargo build --release || exit 1` then `./target/release/matrix-overlay & TESTPID=$!` as TWO statements. Never `cargo run`. Never `cmd && bin &`.
+- C-01: 175-line hard cap per module. `rain_manager.rs` is 63. Do not grow it past 175. Glyph-count hook must stay tiny or live in telemetry.
+- C-02: no new config fields without `#[serde(default)]`. This pass adds none.
+- R-06: production `RainManager::draw`, production-shaped inputs. Defaults are not production-shaped.
+- `/nodelete` [INTENT] block is untouchable.
+- Do not delete existing S-nn / R-nn / F-nn. Amend. New items continue numbering (F10, R-14, S-14 if needed).
+- Do not kill the user's deployed overlay. Temporary binary only.
+
+---
+
+## 2. What to change — files and why
+
+### 2.1 `tests/performance_tests.rs`  (primary)
+
+Current defects:
+- `mrc_config()` starts from `Config::default()` → `rain_speed = 1.0` (live is 0.1). R-06 miss.
+- `measure_frames` does not call `rain.update` between frames. Production does, every tick.
+- No surviving-`show_layout` count.
+- Comment at lines 159–162 cites production rain.draw as 3.95 ms. Receipt is 10.0030 ms over 21,854 calls. Fix the comment.
+
+Changeset:
+
+```
+mrc_config():
+  KEEP starting from Config::default() for unspecified fields (C-02 / deny_unknown_fields).
+  PIN, as literals with a comment citing the live file + date:
+    cosmetics.rain_speed        = 0.1
+    cosmetics.realism           = 4
+    cosmetics.rain_mode         = "fall"
+    general.font_size           = 16
+    cosmetics.matrix_brightness = <copy the live JSON number, write it in the comment>
+  Do NOT open ~/.config/matrix-overlay/config.json from the test.
+
+primed_manager():
+  Keep the 600-step prime, but prime WITH the pinned rain_speed (0.1).
+  Because speed is 10× lower, 600 steps at 33 ms may no longer reach steady state.
+  Compute steps from distance: viewport wrap is ~h+400 px; dy = 60 * 0.033 * rain_speed * speed.
+  Either raise the step count so mean |stream.y| is inside [0, h], or prime until
+  on_screen_fraction is stable across 30 consecutive steps. Record steps used.
+
+measure_frames(rain: &mut RainManager, ...):
+  Between frames: rain.update(Duration::from_millis(33), MRC_W, MRC_H, config)
+  THEN fresh Context, opaque clear, draw.
+  Return (series_ms, series_show_layout_surviving).
+
+NEW: count surviving glyphs inside the draw used by the harness.
+  Do not add a log line on the production hot path.
+  Preferred: a pub(crate) counter on RainManager incremented only when
+  an env or a thread-local is set, reset by the test. See §3.
+
+NEW test (or extend report()):
+  print surviving_show_layout mean, p50, and distinct_sizes_that_survived_clip.
+  Record both MRC and CONTROL.
+
+NEW test_mrc_b_surface_reuse — ONLY run if glyph counts already match and
+  cost still diverges ≥3×. See §3. Do not write it as an always-on gate.
+```
+
+S-01 assert (`m < 20`) on `test_rain_frame_cost_mrc`:
+- After rework, if the MRC lands near 10 ms this assert will PASS.
+- That pass is no longer "the test is wrong" (old AC1 reading) and no longer "F1 is false" (old X-1 reading).
+- It means the MRC now agrees with live. Change the assert comment.
+- Keep the assert at < 20 ms as a regression rail for "did we accidentally rebuild the 612 ms path."
+- X-1 is NOT evaluated until X-LIVE ratio < 3.
+
+### 2.2 `src/render/physics/rain_manager.rs`
+
+Add a surviving-glyph counter that is inert when unset. Must stay well under 175 lines.
+
+```rust
+// thread_local so the test can enable it without touching production call sites
+thread_local! {
+    static COUNT_SHOW: Cell<bool> = const { Cell::new(false) };
+    static SURVIVED: Cell<u32> = const { Cell::new(0) };
+}
+
+pub fn count_show_layout(enable: bool) { COUNT_SHOW.with(|c| c.set(enable)); SURVIVED.with(|s| s.set(0)); }
+pub fn take_survived() -> u32 { SURVIVED.with(|s| s.replace(0)) }
+```
+
+In `draw`, only at the existing clip-pass site (line 45), after the continue:
+
+```rust
+if COUNT_SHOW.with(|c| c.get()) { SURVIVED.with(|s| s.set(s.get() + 1)); }
+```
+
+That is one atomic-free TLS load on the skip path when disabled. Do not allocate. Do not log.
+
+### 2.3 `src/core/telemetry/` + `pipeline.rs`
+
+Already times production `rain.draw` under `MATRIX_OVERLAY_DEBUG_METRICS`. Keep it.
+Add surviving-glyph count to that same debug path IF the TLS hook is on, and print means in `telemetry::summary()`. Do not log per frame.
+
+Also instrument an in-process single-size control in the live binary, debug-gated:
+- one-shot: if env `MATRIX_OVERLAY_DEBUG_CONTROL=1`, flatten depths to 1.0 for the timed draw only (clone streams, do not mutate the live rain). Record `live_single_size_control_4k_ms`. This is the Phase 3 re-entry denominator. Optional this pass; required before anyone argues Phase 3 open.
+
+### 2.4 `implementation-plan.md` + `tasks.md`  (documents only)
+
+Amend, do not rewrite history.
+
+```
+§1.9:
+  Add cell: AC0 pass ∧ X-LIVE trip = UNCALIBRATED_VS_LIVE
+            (lab F1 real, live path disagrees; halt Phase 3; rework MRC)
+  Change X-LIVE from absolute 25 ms to ratio ≥ 3 against in-process 4K rain.draw
+  Keep 25 ms as backstop when the in-process figure is absent
+  State: fps ≥ 15 ∧ present_budget < 40 remains F1_STANDS_REDERIVE (already patched)
+
+§2.5:
+  After this rework completes (ratio < 3 OR ratio still ≥ 3 with glyph counts explained):
+    next mission phase is Phase 5
+    Phases 3–4 demoted to sequel (Extreme@30 quality), opened only if
+      live_rain_draw_4k / live_single_size_control_4k ≥ 3
+
+Phase 2 tasks:
+  Add 2.8 Phase 2 rework (this prompt)
+  AC0 [500,900] stays as investigation record; it is no longer a live gate
+  New AC: X-LIVE ratio
+  New AC: surviving show_layout printed for MRC and CONTROL and live
+
+Phase 5 AC6:
+  Note that LIVE terms already exist and may be used:
+    rain_4k=10.0030  rain_1080=4.2883  clear_x2=3.29  present_x2=1.8473
+    ms_per_tick=20.64  at 1 fps → 2.06%
+  Do not implement Phase 5.
+
+Receipt schema:
+  Add:
+    x_live: { mrc_ms, live_rain_4k_ms, ratio, threshold: 3.0, tripped }
+    glyphs: { mrc_surviving_mean, control_surviving_mean, live_surviving_mean }
+    live_control_4k_ms: <optional>
+```
+
+### 2.5 Do NOT touch this pass
+
+- `src/core/main.rs` F8 clobber (record only)
+- `pipeline.rs` rain.update gate (record only)
+- `drawing.rs` glow (S-13a fill OR mark deferred)
+- glyph_cache.rs / atlas / governor / presets / Pulse
+- user's `~/.config/matrix-overlay/config.json`
+- AC0 numeric window
+
+---
+
+## 3. Pseudocode
+
+### 3.1 Decisive experiment (always run)
+
+```text
+GIVEN pinned literals (rain_speed=0.1, realism=4, font_size=16, rain_mode=fall)
+      prime until on-screen fraction stable
+      enable COUNT_SHOW
+
+FOR each of 40 frames:
+    rain.update(33ms, 4096, 2160, config)     # production does this
+    fresh Context + opaque Source-black clear
+    t0 = Instant::now()
+    rain.draw(...)
+    dt_ms = elapsed
+    survived = take_survived()
+
+RECORD mean_ms, series, survived_mean, distinct_sizes_that_drew
+
+COMPARE
+    live_rain_4k_ms     = 10.0030          # already measured, 21854 calls
+    mrc_release_ms      = <this run>
+    ratio               = mrc_release_ms / 10.0030
+    x_live_trips        = ratio >= 3.0 OR mrc_release_ms > 25
+
+IF survived_mean_MRC ≈ survived_mean_LIVE
+   AND ratio >= 3:
+    RUN 3.2 MRC-B
+ELSE IF survived_mean_MRC >> survived_mean_LIVE:
+    verdict = CLIP_GUARD / y-distribution
+    fix = priming + rain_speed pin (already done); re-run once
+ELSE IF ratio < 3:
+    verdict = X_LIVE_CLEARED
+    Phase 2 may complete
+    Phase 3 stays closed unless live/control ≥ 3 in-process
+```
+
+### 3.2 MRC-B — cheaper third experiment (only if counts match and ratio still ≥ 3)
+
+```text
+surface = ImageSurface::create(ARgb32, 4096, 2160)   # ONCE, reused
+FOR 40 frames:
+    rain.update(...)
+    cr = Context::new(&surface)                      # fresh ctx, same surface
+    opaque clear
+    rain.draw(...)
+
+IF mrc_b_ms drops toward ~10:
+    cause = scaled-font cache dying on surface recreate
+    (current harness already reuses one surface — if this is already the case,
+     MRC-B will NOT drop, and the cause is SHM-backed vs standalone ImageSurface)
+IF mrc_b_ms stays ~612:
+    next experiment (NOT this pass unless cheap):
+      draw onto an SHM-backed ImageSurface without X present
+      OR accept that cargo-test Pango cache ≠ production process cache
+      and stop using cargo-test as the F1 magnitude source
+```
+
+Current harness already creates one surface and reuses it (`measure_frames` line 154).
+MRC-B is therefore "confirm we did not regress to per-frame surface create."
+If the 612 ms figure is already on a reused surface, skip MRC-B and record:
+
+```
+surface_reused: true
+mrc_b: not_applicable
+next_cause_class: process_or_shm_vs_standalone
+```
+
+### 3.3 Live glyph count (30–60 s, debug env, do not mutate user config)
+
+```text
+MATRIX_OVERLAY_DEBUG_METRICS=1
+# enable COUNT_SHOW from an env the binary already keys on, or a new
+# MATRIX_OVERLAY_DEBUG_GLYPHS=1 that only sets the TLS flag at startup
+
+run ./target/release/matrix-overlay directly for 60 s after t>=120 s warm-up
+print in exit summary:
+  rain_draw_4k_ms
+  rain_draw_1080_ms
+  survived_show_layout_4k_mean
+  survived_show_layout_1080_mean
+```
+
+Compare those survived means to the MRC survived mean. That is the 4.5 experiment.
+
+---
+
+## 4. Receipt fields to append
+
+```yaml
+phase: 2.8
+git_sha: "<this commit>"
+mrc:
+  release: { mean_ms: _, series: [], survived_show_layout_mean: _, distinct_sizes_drew: _ }
+  dev:     { mean_ms: _, survived_show_layout_mean: _ }   # record, do not gate
+control:
+  release: { mean_ms: _, survived_show_layout_mean: _ }
+config_literals:
+  rain_speed: 0.1
+  realism: 4
+  font_size: 16
+  matrix_brightness: _
+  prime_steps: _
+live:
+  rain_draw_4k_ms: 10.0030          # unless re-measured
+  rain_draw_1080_ms: 4.2883
+  survived_show_layout_4k_mean: _
+  survived_show_layout_1080_mean: _
+x_live:
+  ratio: _                          # mrc.release.mean_ms / live.rain_draw_4k_ms
+  threshold: 3.0
+  backstop_ms: 25
+  tripped: _
+verdict: X_LIVE_CLEARED | UNCALIBRATED_VS_LIVE | CLIP_GUARD | PROCESS_CACHE
+phase_2_complete: <true only if ratio < 3>
+phase_3: BLOCKED                    # unless live/control_in_process >= 3
+```
+
+---
+
+## 5. Definition of done for this pass
+
+Checkable:
+
+- [ ] `mrc_config()` pins `rain_speed = 0.1` and the other literals. Zero reads of `~/.config`.
+- [ ] `measure_frames` calls `rain.update` between frames.
+- [ ] Surviving `show_layout` count printed for MRC, CONTROL, and (if run) live.
+- [ ] Harness comment no longer says production rain.draw is 3.95 ms.
+- [ ] X-LIVE in plan + tasks is a ratio ≥ 3 against in-process 4K rain.draw, 25 ms backstop kept.
+- [ ] AC0 [500,900] labeled investigation-identity only. Not retuned.
+- [ ] §2.5 / Phase 2 forward contract: next mission phase is Phase 5. 3–4 demoted.
+- [ ] Phase 3 re-entry criterion written: live/control in-process ≥ 3. Not cargo-test control.
+- [ ] F8, ungated `rain.update`, missing S-13a glow recorded as known-open. Not "fixed."
+- [ ] C-01 honored (`wc -l` rain_manager.rs ≤ 175).
+- [ ] User config.json byte-identical.
+- [ ] Receipt block 2.8 appended.
+- [ ] No Phase 3 source. No Phase 5 source. No atlas.
+
+Stop. Bring the 2.8 receipt. Do not open Phase 3. Do not jump to Phase 5 code in this commit.
+```

@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::time::Duration;
 use anyhow::Result;
 use cairo::{Context as CairoContext, Operator};
@@ -33,20 +34,58 @@ impl Renderer {
         self.rain.update(dt, self.width, self.height, config);
         self.visual_elements.borrow_mut().clear();
         if config.cosmetics.rain_mode == "fall" {
-            // [X-LIVE] Time the production rain draw when debug metrics are on, so
-            // the MRC's figure can be reconciled against the running substrate.
-            // Inert otherwise: one env lookup per frame, no allocation, no logging.
-            let dbg = std::env::var_os("MATRIX_OVERLAY_DEBUG_METRICS").is_some();
-            let t = if dbg { Some(std::time::Instant::now()) } else { None };
-            self.rain.draw(&cr, self.width as f64, self.height as f64, *self.frames.borrow(), config)?;
-            if let Some(t) = t {
-                crate::core::telemetry::record_rain_draw(
-                    self.width as u16, self.height as u16, t.elapsed().as_nanos() as u64);
-            }
+            self.draw_rain_timed(&cr, config)?;
         }
         self.draw_metrics(&cr, config, metrics)?;
         drop(cr);
         self.presenter.present(conn, window)?;
+        Ok(())
+    }
+
+    /// Debug-path flags, resolved ONCE. The previous version called
+    /// `env::var_os` on every frame of the path it was measuring.
+    fn debug_flags() -> (bool, bool, bool) {
+        static F: OnceLock<(bool, bool, bool)> = OnceLock::new();
+        *F.get_or_init(|| (
+            std::env::var_os("MATRIX_OVERLAY_DEBUG_METRICS").is_some(),
+            std::env::var_os("MATRIX_OVERLAY_DEBUG_GLYPHS").is_some(),
+            std::env::var_os("MATRIX_OVERLAY_DEBUG_CONTROL").is_some(),
+        ))
+    }
+
+    /// Production rain draw, optionally instrumented.
+    ///
+    /// [X-LIVE] Times the production draw so the MRC's figure can be reconciled
+    /// against the running substrate; [Q1] counts the glyphs that survive the
+    /// clip guard; [Q3] times an in-process single-size control, which is the
+    /// only sanctioned Phase 3 re-entry denominator. All three are inert unless
+    /// their env var was set at startup: no allocation, no logging, no per-frame
+    /// env lookup.
+    fn draw_rain_timed(&mut self, cr: &CairoContext, config: &Config) -> Result<()> {
+        let (dbg, glyphs, control) = Self::debug_flags();
+        let (w, h) = (self.width as f64, self.height as f64);
+        let (gw, gh) = (self.width as u16, self.height as u16);
+        let fc = *self.frames.borrow();
+        if glyphs { crate::render::physics::count_show_layout(true); let _ = crate::render::physics::take_survived(); }
+
+        let t = if dbg { Some(std::time::Instant::now()) } else { None };
+        self.rain.draw(cr, w, h, fc, config)?;
+        if let Some(t) = t {
+            crate::core::telemetry::record_rain_draw(gw, gh, t.elapsed().as_nanos() as u64);
+        }
+        if glyphs {
+            crate::core::telemetry::record_survived(gw, gh, crate::render::physics::take_survived());
+            crate::render::physics::count_show_layout(false);
+        }
+        if control {
+            // Clone so the live simulation is never mutated; flatten depth so
+            // every stream resolves to ONE font size. Same production `draw`.
+            let mut flat = self.rain.clone();
+            for s in &mut flat.streams { s.depth = 1.0; }
+            let t = std::time::Instant::now();
+            flat.draw(cr, w, h, fc, config)?;
+            crate::core::telemetry::record_live_control(gw, gh, t.elapsed().as_nanos() as u64);
+        }
         Ok(())
     }
 

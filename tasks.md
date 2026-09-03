@@ -88,7 +88,7 @@ Branch 1 of the plan (§2.5) before continuing.
 
 ## Phase 2: Disarm the Mock Trap
 
-**STATUS: HALTED — `verdict: UNCALIBRATED_VS_LIVE` (2026-09-03). AC0 passes; X-LIVE trips. Production's 4K `rain.draw` is 10.00 ms; the MRC claims 610.46 ms — 61x. Per X-LIVE: fix the test, never the threshold. PHASE 3 IS BLOCKED.** — LOE-1 · Resolves MT · Must go RED before Phase 3
+**STATUS: HALTED — `verdict: PROCESS_CACHE` (2026-09-03, after the 2.8 rework). The rework eliminated the leading hypothesis instead of clearing the gate: surviving `show_layout` counts MATCH (MRC 1380.8 vs live 1297.0, ratio 1.065), so glyph volume is not the divergence. The gap is per-glyph — live 7.42 us, MRC 438.66 us, 59x — for the same function on the same inputs. Pinning the live `rain_speed=0.1` moved the MRC 1.1%. Cause class: `process_or_shm_vs_standalone`. X-LIVE still trips at ratio 60.55 (gate 3.0). PHASE 3 IS BLOCKED AND DEMOTED: the in-process re-entry test measures 1.25 against a 3.00 gate. Next mission phase is 5.** — LOE-1 · Resolves MT · Must go RED before Phase 3
 
 ### Objective
 Replace the test that stood guard over F1 while measuring the one code path production never takes.
@@ -117,7 +117,9 @@ This phase's deliverable is a **failing** test.
 
   If **not** CALIBRATED: record `verdict: UNCALIBRATED`, **do not honor X-1**, and **do not open Phase 3**. Fix the test — geometry, priming, or size variance — and **do not move the threshold**. Landing outside [500, 900] means *"this is not the workload we diagnosed"*, **not** *"F1 is false"*.
 
-  **X-LIVE — live-agreement rider (round-6, plan §1.9).** Separately from the dev-profile window above: if `mrc.release.mean_ms` **> 25 ms**, record `verdict: UNCALIBRATED_VS_LIVE`, **do not honor X-1**, and **do not open Phase 3** — fix the test, never the threshold. Phase 1 measured the live tick at **19.71 ms total** across both monitors, already paying present, `clear()`, `rain.update` and the glow. A one-surface 4K `RainManager::draw` costing 25 ms or more cannot coexist with that tick; the two readings would describe different programs. AC0 tests the MRC against the investigation; X-LIVE tests it against the running substrate. **Both must hold before X-1 means anything.**
+  **AC0 IS RETIRED AS A LIVE GATE (round-7).** It is kept as an *investigation-identity record* only. The reworked MRC is expected to land near **10 ms** and therefore to FAIL the [500, 900] window. **That failure is correct. Do not re-tune the window to chase it.**
+
+  **X-LIVE — live-agreement rider (round-6 absolute form; superseded round-7 by a RATIO).** Binding form: **X-LIVE trips when `mrc.release.mean_ms / in_process_rain_draw_4k_ms >= 3.0`**, with the 25 ms absolute kept only as a backstop for when the in-process figure is absent. Both forms trip on the round-6 reading (612.530 / 10.0030 = 61.2). A ratio needs no re-tuning after Phase 3 moves the live figure; an absolute threshold would. **Do not re-tune the 25 ms backstop after Phase 3.** Original round-6 wording, retained: if `mrc.release.mean_ms` **> 25 ms**, record `verdict: UNCALIBRATED_VS_LIVE`, **do not honor X-1**, and **do not open Phase 3** — fix the test, never the threshold. Phase 1 measured the live tick at **19.71 ms total** across both monitors, already paying present, `clear()`, `rain.update` and the glow. A one-surface 4K `RainManager::draw` costing 25 ms or more cannot coexist with that tick; the two readings would describe different programs. AC0 tests the MRC against the investigation; X-LIVE tests it against the running substrate. **Both must hold before X-1 means anything.**
 
   **Why this exists:** AC1 and X-1 draw opposite conclusions from the identical observation. AC1 reads a fast release run as *the test is wrong*; X-1 reads it as *the diagnosis is wrong*. Only a calibrated slow run on the same test separates them. Without AC0, a subtly broken MRC produces a fast, green, falsifying number and halts a correct diagnosis — the mirror of the Mock Trap this phase exists to remove.
 - [ ] **AC1** — S-08 (first half): `cargo test --release --test performance_tests test_rain_frame_cost_mrc` **FAILS** with a mean **> 20 ms/frame**. **Audit correction:** the gate is "exceeds the threshold", not "reports ~750 ms" — that figure was measured under the dev profile and may not reproduce under `--release` (`opt-level = "z"`, LTO, `codegen-units = 1`). Record the actual figure under both profiles. A passing result here means the test is not exercising the production path — fix the test, not the threshold.
@@ -129,6 +131,30 @@ This phase's deliverable is a **failing** test.
   - **X-1:** *only if AC0 returned CALIBRATED **and** X-LIVE did not trip (`mrc.release.mean_ms <= 25`)* — is the `--release` MRC mean **≤ 20 ms/frame**? If AC0 returned UNCALIBRATED, X-1 is not evaluated at all: fix the test first. If CALIBRATED and yes, the ~750 ms baseline was a dev-profile artifact and Phase 3 has nothing to fix that could explain 61%.
   - **X-2:** are the MRC mean and the single-size control **within 20% of each other** under `--release`? If yes, A-02 is false *even if both are slow* — the cost is glyph volume or fill rate, not font-cache eviction, and neither bucketing nor the atlas buys the campaign anything.
   - Either one landing means **halt: F1 is the wrong root cause.** Do not open Phase 3. Keep Phases 1–2 — they stand on their own — and re-center on whatever S-13a/S-13b named. Record the decision and its numbers in the receipt either way, including when F1 survives.
+
+- [/] 2.8 — **PHASE 2 REWORK — resolve `UNCALIBRATED_VS_LIVE` (round-7 adjudication).**
+  - [x] 2.8a — `mrc_config()` pins every rain-path field to a **literal copied from the live config on 2026-09-03**: `rain_speed = 0.1` (default is 1.0 — the R-06 miss), `realism = 4`, `font_size = 16`, `rain_mode = "fall"`, `matrix_brightness = 0.35`. **The test must not read `~/.config`** — reproducibility over convenience.
+  - [x] 2.8b — Prime until the **on-screen fraction is stable** (last-30 mean within 0.01 of the previous-30 mean), not for a fixed 600 steps. At `rain_speed = 0.1` one wrap of the `h + 400` px span takes 1,300–6,400 steps; 600 left the field barely moved. Record `prime_steps`.
+  - [x] 2.8c — Call `rain.update` **between frames** in `measure_frames`. Production advances the simulation every tick; the harness did not.
+  - [x] 2.8d — **Count surviving `show_layout` calls** — the glyphs that pass the clip guard, not `streams × 10` — for the MRC, the control, **and the live path**. Volume is the only variable `draw` has; this is the decisive instrument for the 61×.
+  - [x] 2.8e — Fix the harness comment citing production `rain.draw` as **3.95 ms**. The figure of record is **10.0030 ms** (21,854 in-process calls, 12 minutes).
+  - [x] 2.8f — **MRC-B** (one surface reused, fresh `Context` per frame) **only if** survivor counts already match and the ratio is still ≥ 3. If the harness already reuses one surface, record `surface_reused: true` / `mrc_b: not_applicable` and name the next cause class rather than running a null experiment.
+  - [x] 2.8g — Add an **in-process single-size control** to the live binary behind `MATRIX_OVERLAY_DEBUG_CONTROL=1` (clone the streams, flatten `depth`, never mutate the live rain). This is the **only** sanctioned Phase 3 re-entry denominator.
+  - [x] 2.8h — **Record, do not fix, this pass:** F8 (`main.rs` clobbers `rain_mode` after `Config::load`); `rain.update` sitting outside the `"fall"` gate in `pipeline.rs` (a Pulse leak); S-13a's metrics glow never measured.
+
+### Acceptance criteria — Phase 2 rework (2.8)
+- [ ] **AC0R — UNMET (2026-09-03: ratio 60.55).** **X-LIVE ratio.** `mrc.release.mean_ms / in_process_rain_draw_4k_ms < 3.0`. Backstop 25 ms retained for a missing in-process figure. **Fix the test, never the threshold.**
+- [x] **AC1R** — Surviving `show_layout` means printed for the MRC, the control, **and** the live path, with their ratio recorded and explained.
+- [x] **AC2R** — Zero reads of `~/.config/matrix-overlay/config.json` from the test suite; the user's config byte-identical after the pass.
+- [x] **AC3R** — `verdict` recorded as one of `X_LIVE_CLEARED` / `UNCALIBRATED_VS_LIVE` / `CLIP_GUARD` / `PROCESS_CACHE`. **`phase_2_complete: true` only when the ratio is < 3.**
+- [x] **AC4R** — **Phase 3 remains BLOCKED regardless of AC0R.** It opens only on `live_rain_draw_4k / live_single_size_control_4k >= 3.0`, both measured **in-process**. The cargo-test control is not the denominator.
+- [x] **AC5R** — C-01 honored: `rain_manager.rs`, `pipeline.rs`, `telemetry/mod.rs`, `telemetry/report.rs` each ≤ 175 lines.
+
+### Forward contract after the 2.8 rework — **the next mission phase is Phase 5**
+Round-7 adjudication: once the X-LIVE ratio clears, **Phases 3–4 are DEMOTED to sequels** (Extreme@30
+quality work, the same shape Phase 6 already has). They are not dropped and not mission-critical. The
+campaign proceeds to **Phase 5**, whose AC6 budget identity can already be computed from live terms.
+Phase 3 opens only on the in-process criterion in AC4R.
 
 ### Forward contract to Phase 3 — **and the mandatory stop**
 A red MRC exists that measures the real path. Phase 3 is complete when and only when it turns green.
@@ -238,6 +264,19 @@ refresh guidance: *"1Hz or 0.5Hz is sufficient. Avoid 60fps animations."* — [d
           + (present_ms_hdmi + present_ms_edp) × fps ÷ 10        <- already per-CRTC, do NOT × monitors
   ```
   **Round-4 correction:** the earlier single-line form multiplied a summed per-CRTC `present_ms` by `monitors`, counting every present twice. `cairo_rest_ms` is one-surface and scales by `monitors`; `present_ms_*` are per-CRTC, summed, and scale by `fps` alone. **Every term is a measured number by the time this phase runs** — `rain_ms` from the Phase 3/4 MRC, `cairo_rest_ms` from S-13a (task 2.6b), `present_ms` per CRTC from S-13b (task 1.7). The result must project **under 3%**. **Round-2 audit: the earlier "or a recorded estimate otherwise" clause is deleted** — a gate satisfiable by an unmeasured number is Hallucinated Success under a new name, and it is the exact defect class this audit exists to remove. Worked counter-example from the pre-audit draft: S-02's 8 ms ceiling × the proposed default of 10 fps = 8% of one core on the 4K panel alone, before `rest_ms` and before the second monitor — every written gate green, S-04 failed. If the projection exceeds 3%, **lower the default `target_fps` here** (plan §2.5 branch); do not defer the problem to the optional Phase 6.
+
+  **LIVE TERMS ALREADY EXIST (round-7 — document only, do NOT implement Phase 5 yet).** Every term this AC needs was measured in Phase 2 against the running binary, *before* any Phase 3–4 work:
+
+  ```yaml
+  rain_draw_4096x2160: 10.0030   # in-process, 21854 calls, 12 min
+  rain_draw_1920x1080:  4.2883
+  clear_x2:             3.29
+  present_x2:           1.8473
+  ms_per_tick:         20.64     # accounted 19.43 vs 20.64 observed - closes within 6%
+  at_target_fps_1:      2.06 %   # 20.64 x 1 / 10 - UNDER the 3% S-04 gate
+  ```
+
+  **S-04 is therefore reachable by the frame governor alone, with the rain path untouched.** That is measured, not projected — and it is why round 7 demotes Phases 3–4 to sequels and makes **Phase 5 the next mission phase**. `target_fps` default must be re-derived from these numbers, not from the provisional 10 in task 5.3.
 
 ### Forward contract to Phases 6 and 7
 Frame cost (Phase 4) × frame rate (Phase 5) is now bounded and tunable, and AC6 has projected it under

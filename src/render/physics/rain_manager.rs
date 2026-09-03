@@ -1,4 +1,5 @@
 // src/render/physics/rain_manager.rs
+use std::cell::Cell;
 use std::time::Duration;
 use anyhow::Result;
 use cairo::Context as CairoContext;
@@ -7,6 +8,31 @@ use rand::{Rng, thread_rng};
 use crate::core::config::Config;
 use super::rain_stream::{RainStream, random_char};
 
+thread_local! {
+    /// Enabled only by a test or by the debug-gated live path. When false, the
+    /// hook below is a single thread-local `bool` load on the draw path: no
+    /// allocation, no atomic, no logging.
+    static COUNT_SHOW: Cell<bool> = const { Cell::new(false) };
+    /// Glyphs that SURVIVED the clip guard and reached `show_layout`.
+    static SURVIVED: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Arm (or disarm) surviving-`show_layout` counting on the current thread and
+/// zero the counter.
+///
+/// [Q1, round 7] The MRC and the live substrate disagreed by 61x on the cost of
+/// the same function. Glyph *volume* is the only variable `draw` has — the clip
+/// guard is what decides it — so counting survivors on both sides is the
+/// decisive instrument for that divergence.
+pub fn count_show_layout(enable: bool) {
+    COUNT_SHOW.with(|c| c.set(enable));
+    SURVIVED.with(|s| s.set(0));
+}
+
+/// Read and zero the surviving-glyph counter for the current thread.
+pub fn take_survived() -> u32 { SURVIVED.with(|s| s.replace(0)) }
+
+#[derive(Clone)]
 pub struct RainManager {
     pub streams: Vec<RainStream>, pub realism: u32,
     pub last_w: i32, pub last_h: i32,
@@ -43,6 +69,7 @@ impl RainManager {
             for (i, &g) in s.glyphs.iter().enumerate() {
                 let y = s.y - (i as f64 * size * 1.2);
                 if y < -20.0 || y > h + 20.0 { continue; }
+                if COUNT_SHOW.with(|c| c.get()) { SURVIVED.with(|s| s.set(s.get() + 1)); }
                 let a = if i == 0 { 1.0 } else { (s.depth * s.depth * (1.0 - (i as f64 / s.glyphs.len() as f64))).clamp(0.0, 1.0) };
                 cr.save()?;
                 cr.set_source_rgba(0.0, 1.0, 0.25, a * config.cosmetics.matrix_brightness);

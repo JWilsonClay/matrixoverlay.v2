@@ -2,6 +2,7 @@
 use rand::Rng;
 use rand::thread_rng;
 
+#[derive(Clone)]
 pub struct RainStream {
     pub x: f64, pub y: f64, pub speed: f64,
     pub glyphs: Vec<char>, pub depth: f64,

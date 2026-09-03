@@ -404,9 +404,23 @@ AC0 calibrates the MRC against the **investigation** (500–900 ms dev-profile a
 an MRC that faithfully measures something *production does not do* — and Phase 1's live data makes
 that a live possibility rather than a hypothetical.
 
-**Rule.** Once the `--release` MRC exists: if `mrc.release.mean_ms > 25`, the verdict is
-**`UNCALIBRATED_VS_LIVE`**. Do **not** honor X-1. Do **not** open Phase 3. Fix the test — never move
-the threshold.
+**Rule (round-6 form, superseded by the ratio below — kept because it is what tripped).** Once the
+`--release` MRC exists: if `mrc.release.mean_ms > 25`, the verdict is **`UNCALIBRATED_VS_LIVE`**. Do
+**not** honor X-1. Do **not** open Phase 3. Fix the test — never move the threshold.
+
+**Rule (round-7 form, binding).** X-LIVE is a **ratio**, not an absolute:
+
+```
+X-LIVE trips when   mrc.release.mean_ms / in_process_rain_draw_4k_ms  >=  3.0
+backstop            mrc.release.mean_ms > 25 ms, used only when the in-process figure is absent
+```
+
+**Why a ratio.** The absolute 25 ms was derived from a 19.71 ms tick that predates measurement. Once
+Phase 3 lands, the live figure moves and 25 ms would have to be re-tuned — and a threshold that has
+to be re-tuned after every change is not a falsifier. The ratio needs no re-tuning: it asks the only
+question that matters, *does the test measure the same thing the process does*. Both forms trip on
+the round-6 reading (612.530 / 10.0030 = 61.2), so nothing is weakened by the change. **Do not
+re-tune the 25 ms backstop after Phase 3.**
 
 **Why 25 ms.** The MRC times `RainManager::draw` on **one** surface. The live tick is **19.71 ms
 total**, and that budget already pays for present, the second monitor, `clear()`, `rain.update` and
@@ -419,6 +433,28 @@ observed at **30.2 fps** is physically impossible — 750 ms would cap the loop 
 exactly the inference A-01 made. **That number was the 1.3 fps inference talking to itself.** AC0
 still tests identity against the investigation; X-LIVE tests identity against the running substrate.
 Both must hold before X-1 means anything.
+
+### The AC0-passes / X-LIVE-trips cell (round-7, measured)
+
+| AC0 | X-LIVE | verdict | action |
+|---|---|---|---|
+| CALIBRATED | does not trip | proceed — X-1 and X-2 may now be honored | normal Phase 2 completion |
+| CALIBRATED | **trips** | **`UNCALIBRATED_VS_LIVE`** | **lab F1 is real, the live path disagrees. Halt Phase 3. Rework the MRC — never the threshold.** |
+| UNCALIBRATED | either | `UNCALIBRATED` | fix the test; X-1 is not honored |
+
+**This cell is not hypothetical — it is what Phase 2 returned.** The MRC reproduced the investigation
+exactly (609.8 ms dev, inside [500,900], 69.2× its control, R-06 satisfied) *and* contradicted the
+substrate by 61×. AC0 alone would have certified it and opened Phase 3 on a workload production never
+runs. **AC0 is retired as a live gate** and kept only as an investigation-identity record: the
+reworked MRC is expected to land near 10 ms and therefore to FAIL [500,900]. That failure is correct.
+**Do not re-tune the 500–900 window to chase it.**
+
+**Clearing `UNCALIBRATED_VS_LIVE` requires both:**
+
+1. reworked `mrc.release.mean_ms / in_process_rain_draw_4k_ms < 3.0`, and
+2. the surviving-`show_layout` counts on both sides recorded, with their ratio explained.
+
+That clears **Phase 2 completion only**. It does **not** open Phase 3 (see §2.5).
 
 A falsified F1 does **not** invalidate the campaign's instrumentation work. Phases 1 and 2 stand: the
 `overlay_cpu` fix, the `fps` metric, the disarmed Mock Trap, S-13a and S-13b are all independently
@@ -459,7 +495,7 @@ architecture is the method.
 | Dimension | Now | End State |
 |---|---|---|
 | CPU (live) | 60.7% of a core | < 3% of a core (< 0.5% Pulse) |
-| Rain frame cost | ~750 ms (dev profile) | < 20 ms, with zero hot-path Pango shaping (S-02) |
+| Rain frame cost | ~~~750 ms (dev profile)~~ **10.0030 ms live, in-process** *(round-7 correction)* | < 20 ms — **already met live**; S-02's zero-hot-path-shaping goal moves to the demoted Phase 3–4 sequel |
 | Self-reported CPU | 3.79% (16× low) | Matches Method M-1 ±1pp |
 | Frame rate | Unknown / inferred | On-screen metric, ±10% accurate |
 | Frame cap | Fails open under load | Holds at configured interval |
@@ -510,6 +546,9 @@ the next agent re-learning this.
 | The budget identity (§1.3) projects the default preset **above 3%** at Phase 5's chosen `target_fps` | **Lower the default `target_fps` before Phase 9** — do not proceed hoping Phase 6 recovers the difference. Phase 6 is optional by §2.5; the mission is not. `concept.md`'s companion guidance (pitfalls.md:72) already sanctions 1Hz. |
 | Phase 7 is reached and F8 (`main.rs:28`) has not been fixed | **Halt Phase 7.** S-05 cannot be measured while startup overwrites `rain_mode`; a "passing" Pulse Mode measured against the fall renderer is Hallucinated Success. |
 | Any of §1.9's X-1, X-2 or X-3 lands at the Phase 2/3 stop | **F1 is the wrong root cause. Halt; do not open Phase 3.** Keep Phases 1–2 — instruments, MRC, S-13a/S-13b are all independently valuable — and re-center the campaign on whatever S-13 named. This is a *re-diagnosis*, not a failure of the work already done. |
+| **X-LIVE trips while AC0 passes** *(round-7 — this fired)* | **Lab F1 is real; live F1 is not.** MRC 612.5 vs its own control 8.55 = 72× (F1 reproduced in cargo-test); production `rain.draw` 10.0030 vs the same control = 1.17× (production sits *on* the control). Halt Phase 2 for rework, do not open Phase 3, and do not touch the threshold. |
+| **Phase 2 rework clears the X-LIVE ratio** | **The next mission phase is Phase 5**, not Phase 3. **Phases 3–4 are DEMOTED to sequels** — Extreme@30 quality work, the same shape Phase 6 already has. They are not dropped and not mission-critical. |
+| **Anyone proposes re-opening Phase 3** | Permitted **only** when `live_rain_draw_4k / live_single_size_control_4k >= 3.0`, **both measured in-process inside the running overlay**. The cargo-test control (8.55 ms) is *not* the denominator — it is a different process with a different Pango cache. On today's numbers that ratio is ≈ 1.17 and Phase 3 stays closed. |
 | S-13 shows `rest_ms` dominates `rain_ms` after Phase 4 | The rain path is no longer the cost centre. Re-prioritize: the present path, the glow passes, and the `SharedMetrics` lock (Phase 6.1/6.3) become primary rather than optional. Record the reversal explicitly. |
 
 ## 2.6 Common Developer Themes — Alignment

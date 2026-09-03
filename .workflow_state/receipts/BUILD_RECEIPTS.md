@@ -177,3 +177,137 @@ at_target_fps_1_pct: 2.06 # S-04 gate is 3%
    frame-budget number derived from the 750 ms figure is wrong by ~60x.
 6. **S-04 is reachable by frame rate alone.** 20.64 ms/tick at `target_fps=1` = **2.06%**, under the
    3% gate, with the rain path untouched. This is now measured rather than projected.
+
+## 2026-09-03 — /execute-build — Phase 2.8: Rework after X-LIVE (round-7 adjudication)
+- Phase/Stage: Phase 2.8 — Phase 2 rework
+- Grade/Status: **REWORK COMPLETE, X-LIVE STILL TRIPS — `verdict: PROCESS_CACHE`.** Phase 2 does NOT complete. Phase 3 remains BLOCKED and is now DEMOTED.
+- Files: (none created) | tests/performance_tests.rs, src/render/physics/rain_manager.rs, src/render/physics/rain_stream.rs, src/render/physics/mod.rs, src/render/engine/pipeline.rs, src/core/telemetry/mod.rs, src/core/telemetry/report.rs, implementation-plan.md, tasks.md
+- Deviation Log: NONE — no mid-phase HALT/approval exchange occurred.
+- Commit: see 6b
+
+```yaml
+phase: 2.8
+git_sha_base: "f5dc741"
+against: "Grok round-7 adjudication"
+mrc:
+  release:
+    mean_ms: 605.684
+    p50: 601.779
+    p95: 631.553
+    frame1: 629.540
+    frame40: 613.539
+    survived_show_layout_mean: 1380.8
+    us_per_glyph: 438.66
+    distinct_sizes_configured: 162
+  release_isolated:                      # single test in the process — rules out cross-test cache pollution
+    mean_ms: 577.911
+    survived_show_layout_mean: 1368.2
+    us_per_glyph: 422.39
+control:
+  release:
+    mean_ms: 8.176
+    survived_show_layout_mean: 1413.2
+    us_per_glyph: 5.79
+config_literals:                         # copied from the live config 2026-09-03; the test reads no file
+  rain_speed: 0.1                        # was Config::default() 1.0 — the R-06 miss, now fixed
+  realism: 4
+  font_size: 16
+  rain_mode: "fall"
+  matrix_brightness: 0.35
+  prime_steps: 7000                      # stability-based, not the old fixed 600
+live_run_a:                              # clean: DEBUG_METRICS + DEBUG_GLYPHS, 420 s, pid 856683
+  m1_cpu_pct: 60.4613                    # t0=0 t1=25394 ticks, window 420.0042 s
+  fps: 30.2
+  rain_draw_4k_ms: 9.6220                # 12691 calls
+  rain_draw_1080_ms: 4.2344
+  survived_show_layout_4k_mean: 1297.0
+  survived_show_layout_1080_mean: 561.8
+  us_per_glyph_4k: 7.42
+  us_per_glyph_1080: 7.54
+  present_ms_summed: 1.6160
+live_run_b:                              # + DEBUG_CONTROL, 300 s, pid 859448 — control overdraw halves headroom
+  rain_draw_4k_ms: 9.1641                # 8574 calls
+  rain_draw_1080_ms: 4.2332
+  live_control_4k_ms: 7.3164             # in-process single-size control — the Phase 3 denominator
+  live_control_1080_ms: 3.0701
+  live_over_control_4k: 1.25
+  live_over_control_1080: 1.38
+  note: "the control draw is a SECOND full rain draw onto the production surface; it depresses fps and inflates 1080p pre_draw. Timings for rain.draw and the control itself are taken separately and are unaffected."
+x_live:
+  form: RATIO                            # round-7; 25 ms kept only as a backstop
+  mrc_release_mean_ms: 605.684
+  live_rain_4k_ms: 10.0030               # figure of record (21854 calls); run A's 9.6220 agrees within 4%
+  ratio: 60.55
+  threshold: 3.0
+  backstop_ms: 25
+  tripped: true
+glyphs:
+  mrc_surviving_mean: 1380.8
+  control_surviving_mean: 1413.2
+  live_surviving_mean_4k: 1297.0
+  mrc_over_live: 1.065                   # WITHIN 6% — volume is NOT the divergence
+per_glyph_divergence: 59.1               # 438.66 us (MRC) / 7.42 us (live), same function, same volume
+surface_reused: true
+mrc_b: not_applicable                    # harness already reuses one surface; running it would be a null experiment
+next_cause_class: process_or_shm_vs_standalone
+verdict: PROCESS_CACHE
+phase_2_complete: false                  # requires ratio < 3
+phase_3: BLOCKED_AND_DEMOTED
+acceptance:
+  AC0R: UNMET                            # ratio 60.55, gate < 3.0
+  AC1R: MET                              # survivor means recorded for MRC, control, and live; ratio explained
+  AC2R: MET                              # zero ~/.config reads; config.json md5 4747e9c8a1bb239170f3a446d083a4e6 unchanged
+  AC3R: MET                              # verdict recorded as PROCESS_CACHE
+  AC4R: MET                              # Phase 3 criterion measured in-process: 1.25 vs the 3.00 gate
+  AC5R: MET                              # rain_manager 90, pipeline 112, telemetry/mod 157, telemetry/report 99 — all <= 175
+```
+
+### Findings — Phase 2.8
+
+1. **The decisive experiment answered cleanly, and it eliminated the leading hypothesis.**
+   Surviving `show_layout` calls: MRC **1380.8**, live 4K **1297.0** — a ratio of **1.065**. The two
+   paths draw the same number of glyphs. **The clip guard is not the divergence**, and neither is the
+   `rain_speed` 0.1-vs-1.0 defect that was the leading suspect. Pinning it to the live 0.1 moved the
+   MRC from 612.530 to 605.684 ms — **1.1%**. The R-06 violation was real and is fixed on its merits;
+   it was not the cause.
+
+2. **The divergence is per-glyph, not per-frame.** Same function, same glyph volume:
+   live **7.42 us/glyph**, MRC **438.66 us/glyph** — **59x**. The 1080p panel independently reports
+   **7.54 us/glyph**, so the live cost is linear in glyph volume across two geometries.
+
+3. **Font-size churn costs the live process almost nothing and costs the test everything.**
+   Live 4K with 162 distinct sizes runs at **1.25x** its own in-process single-size control. The
+   cargo-test MRC runs at **74x** its cargo-test control. The same code, the same inputs, the opposite
+   result. **Lab F1 is real; live F1 is not.**
+
+4. **Cross-test cache pollution is ruled out.** The MRC run alone in its process reports **577.911 ms**
+   (1368.2 survivors, 422.39 us/glyph) — the same regime. The control test running first is not what
+   makes the MRC slow.
+
+5. **MRC-B was correctly skipped.** `measure_frames` already creates one `ImageSurface` and reuses it
+   across all 40 frames, with a fresh `Context` and an opaque clear per frame — production's exact
+   shape. Running MRC-B would have confirmed a property already true. Recorded as
+   `surface_reused: true`, `mrc_b: not_applicable`. Remaining cause class:
+   **`process_or_shm_vs_standalone`** — the cargo-test process rasterizes against a standalone
+   `ImageSurface` with default Cairo font options, while the overlay rasterizes against the presenter's
+   SHM-backed surface in a process with a live X connection and whatever font options that implies.
+
+6. **Phase 3 does not open, and now cannot be argued open.** The re-entry criterion is
+   `live_rain_draw_4k / live_single_size_control_4k >= 3.0`, both in-process. Measured: **1.25**
+   (1080p: 1.38). Bucketing and the glyph atlas would attack a cost the live process does not pay.
+   Phases 3-4 are demoted to sequels per plan §2.5.
+
+7. **The mission lever is Phase 5.** `ms_per_tick` 20.64 at `target_fps = 1` projects **2.06%**,
+   under the S-04 3% gate, with the rain path untouched.
+
+8. **Recorded, not fixed, per the round-7 boundary:**
+   - **F8 still live** — `src/core/main.rs:28` clobbers `config.cosmetics.rain_mode = "fall"` after
+     `Config::load()`. Phase 7 fixes it; Phase 7 cannot be certified until it does.
+   - **`rain.update` is outside the `"fall"` gate** in `pipeline.rs` — it runs in every mode, so a
+     future Pulse Mode still pays the physics tick. A Pulse leak, not yet a cost centre (0.0031 ms).
+   - **S-13a's metrics glow is still unmeasured** — `drawing.rs:27-39`, six `show_layout` calls per
+     metric per frame. It is inside the live identity's 6% residual but has never been isolated.
+
+9. **One in-scope addition beyond the prompt's changeset:** `Renderer::debug_flags()` resolves the
+   three debug env vars **once** via `OnceLock`. The prior code called `env::var_os` on every frame of
+   the very path it was measuring. Noted here rather than left silent.

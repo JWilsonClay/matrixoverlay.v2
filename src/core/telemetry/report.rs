@@ -2,7 +2,7 @@
 //! Formatting for the telemetry summary printed once at exit.
 //! Split out of `mod.rs` to hold both files under the 175-line cap (C-01).
 
-use super::{present_count, rain_draw_snapshot, timings_snapshot};
+use super::{live_control_snapshot, present_count, rain_draw_snapshot, survived_snapshot, timings_snapshot};
 
 fn mean_ms(total_ns: u64, n: u64) -> f64 {
     if n == 0 { 0.0 } else { total_ns as f64 / n as f64 / 1_000_000.0 }
@@ -44,6 +44,31 @@ pub fn summary() -> String {
             out.push_str(&format!("{:<15} calls={:>8}  rain_draw={:>10.4} ms\n", geom, n, mean_ms(*ns, *n)));
         }
     }
+    let survived = survived_snapshot();
+    if !survived.is_empty() {
+        out.push_str("\n=== Q1 — surviving show_layout calls per production rain.draw (means) ===\n");
+        for (geom, (sum, n)) in &survived {
+            let mean = if *n == 0 { 0.0 } else { *sum as f64 / *n as f64 };
+            out.push_str(&format!("{:<15} frames={:>8}  survived_show_layout={:>9.1}\n", geom, n, mean));
+        }
+    }
+
+    let control = live_control_snapshot();
+    if !control.is_empty() {
+        out.push_str(
+            "\n=== Q3 — in-process single-size CONTROL (means, ms) — Phase 3 re-entry denominator ===\n",
+        );
+        for (geom, (ns, n)) in &control {
+            let c = mean_ms(*ns, *n);
+            let live = rain.get(geom).map(|(rns, rn)| mean_ms(*rns, *rn)).unwrap_or(0.0);
+            let ratio = if c > 0.0 { live / c } else { 0.0 };
+            out.push_str(&format!(
+                "{:<15} calls={:>8}  control={:>9.4} ms  live/control={:>6.2}  (Phase 3 opens at >= 3.00)\n",
+                geom, n, c, ratio
+            ));
+        }
+    }
+
     out
 }
 

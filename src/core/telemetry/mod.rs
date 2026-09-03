@@ -30,6 +30,16 @@ static PRESENT_COUNT: AtomicU64 = AtomicU64::new(0);
 /// Per-geometry X-side timings. Nanoseconds, to avoid float accumulation drift.
 static PRESENT_TIMINGS: Mutex<BTreeMap<String, GeomTimings>> = Mutex::new(BTreeMap::new());
 
+/// Per-geometry surviving `show_layout` calls: (sum, samples). Round-7 Q1 — the
+/// glyph volume that actually reaches Pango, on the live path, for comparison
+/// against the MRC's own survivor count.
+static SURVIVED_GLYPHS: Mutex<BTreeMap<String, (u64, u64)>> = Mutex::new(BTreeMap::new());
+
+/// Per-geometry in-process single-size control: (ns, calls). The Phase 3
+/// re-entry denominator (round-7 Q3) — measured inside the running overlay, NOT
+/// in cargo-test.
+static LIVE_CONTROL: Mutex<BTreeMap<String, (u64, u64)>> = Mutex::new(BTreeMap::new());
+
 /// Accumulated X-side cost for one CRTC geometry.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GeomTimings {
@@ -96,6 +106,34 @@ pub fn record_rain_draw(w: u16, h: u16, ns: u64) {
         e.0 = e.0.saturating_add(ns);
         e.1 = e.1.saturating_add(1);
     }
+}
+
+/// Record surviving `show_layout` calls for one production `rain.draw`.
+pub fn record_survived(w: u16, h: u16, n: u32) {
+    if let Ok(mut m) = SURVIVED_GLYPHS.lock() {
+        let e = m.entry(geom_key(w, h)).or_insert((0, 0));
+        e.0 = e.0.saturating_add(n as u64);
+        e.1 = e.1.saturating_add(1);
+    }
+}
+
+/// Record one in-process single-size control draw.
+pub fn record_live_control(w: u16, h: u16, ns: u64) {
+    if let Ok(mut m) = LIVE_CONTROL.lock() {
+        let e = m.entry(geom_key(w, h)).or_insert((0, 0));
+        e.0 = e.0.saturating_add(ns);
+        e.1 = e.1.saturating_add(1);
+    }
+}
+
+/// Snapshot of per-CRTC surviving glyph counts.
+pub fn survived_snapshot() -> BTreeMap<String, (u64, u64)> {
+    SURVIVED_GLYPHS.lock().map(|m| m.clone()).unwrap_or_default()
+}
+
+/// Snapshot of the in-process single-size control.
+pub fn live_control_snapshot() -> BTreeMap<String, (u64, u64)> {
+    LIVE_CONTROL.lock().map(|m| m.clone()).unwrap_or_default()
 }
 
 /// Snapshot of per-CRTC `rain.draw` cost.
