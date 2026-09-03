@@ -621,3 +621,45 @@ Two lead-in mismatches left (apply with the patches above, then execute):
 2. Phase 5 AC6 / §1.3 identity still does `(rain_ms + cairo_rest_ms + present_ms) × fps × monitors ÷ 10`. Replace with the two-line identity in §2.
 
 No other change required. After those two edits: open Phase 1 against `ab626d9`. Scope remains Phase 1 then Phase 2, then §1.9.
+
+---
+
+```yaml
+q1: NO
+must_change_before_code: false
+open_phase_1_against: d240c80
+scope: [phase_1, phase_2, then_§1.9_stop]
+q2: END_LOOP
+```
+
+**1.** Nothing in `ab626d9 → d240c80` misapplied the round-4 items. Identity, AC0, (2,15) band, `cargo run` purge, receipt schema — all landed.
+
+Two leftover sentences. Neither is a Phase 1 code defect. Patch them when convenient; do not hold the build.
+
+| site | leftover | binding text already is |
+|---|---|---|
+| `implementation-plan.md` ~L170 | “S-13b therefore rides the temporary `cargo run --release`” | S-13b row + §1.6 + Phase 1 AC2: `cargo build` then `./target/release/matrix-overlay` |
+| `implementation-plan.md` A-01 ~L202 | “If Phase 1 shows the live rate is not ~1.3 fps, the F1 diagnosis stands” | §1.9 + §2.5 Branch 1: F1 stands in that band only if X-1 and X-2 miss |
+
+Phase 9 AC7 still says “a Phase 1 `cargo run` still alive.” That names the forbidden form as a suspect. Leave it.
+
+**2.** End the review loop. Remaining questions are measurements:
+
+- AC0 window [500, 900]
+- live `fps` vs 1.3 / (2,15) / ≥15
+- `present_ms` magnitude
+- whether the release MRC is slow
+
+Further reading can only refine thresholds that Phase 1–2 are about to set. The only defect class still findable by reading is a leftover sentence that contradicts a patched AC — finite `rg`, not another round.
+
+```yaml
+execute:
+  commit: d240c80
+  phase: 1
+  then: 2
+  then: evaluate §1.9 against receipts/BUILD_RECEIPTS.md
+  do_not: open Phase 3 in this loop
+pid_rule: cargo build --release && ./target/release/matrix-overlay & TESTPID=$!
+forbidden: cargo run
+m1_phase_1: sample /proc/$TESTPID/stat  # not pgrep -x
+```

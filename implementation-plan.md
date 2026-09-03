@@ -167,8 +167,10 @@ both. `monitors` is **2** on this host
 The Cairo half (S-13a) needs a production-geometry surface, which the Phase 2 MRC harness builds. The
 X half (S-13b) needs a live X connection, SHM attachment and real RandR output — none of which Phase 2
 stands up. **Timing the present path inside the MRC harness would be a new Mock Trap**: a present-path
-number taken off a path production does not take. S-13b therefore rides the temporary `cargo run
---release` that Phase 1 already starts for AC2/AC3, where the connection is real.
+number taken off a path production does not take. S-13b therefore rides the temporary release run
+that Phase 1 already starts for AC2/AC3, where the connection is real — `cargo build --release` as a
+**separate, completed step**, then `./target/release/matrix-overlay` executed directly. Never
+`cargo run`; see the pid rule in Phase 1 AC2.
 
 Both halves are **measured before Phase 5 closes**. Phase 5 AC6 carries no estimate escape hatch.
 
@@ -199,8 +201,11 @@ must evaluate this identity before closing.
 
 - **A-01** — The ~1.3 fps live frame rate is **inferred**, not measured (F6). ptrace_scope=1 blocked
   direct instrumentation and Xvfb is absent. **Phase 1 converts this assumption into a measurement.**
-  If Phase 1 shows the live rate is *not* ~1.3 fps, the F1 diagnosis stands (it is independently
-  measured) but the frame-budget arithmetic in Phases 5–6 must be re-derived.
+  If Phase 1 shows the live rate is *not* ~1.3 fps, the frame-budget arithmetic in Phases 5–6 must be
+  re-derived (§2.5 Branch 1). **F1 does not stand unconditionally on that account** *(round-4/5
+  correction)* — a wrong A-01 says nothing about whether font-cache eviction is present. In the
+  `fps ∈ (2, 15)` band F1 stands only if §1.9's X-1 and X-2 both miss; at `fps ≥ 15` with the present
+  budget above 40%, X-3 fires and F1 is falsified.
 - **A-02** — Pango font-cache eviction is the mechanism. Evidence: 0.02 ms for 239
   `set_font_description` calls in isolation, versus ~4.8 ms per size change when a `show_layout`
   follows, versus a drop from 692 ms → 102 ms on the identical workload when live layout references
