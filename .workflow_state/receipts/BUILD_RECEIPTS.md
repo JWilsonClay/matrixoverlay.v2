@@ -100,3 +100,80 @@ status: PHASE COMPLETE
 ```
 
 - Grade/Status: PHASE COMPLETE — 10/10 tasks, 6/6 acceptance criteria
+
+## 2026-09-03 — /execute-build — Phase 2: Disarm the Mock Trap
+- Phase/Stage: Phase 2: Disarm the Mock Trap
+- Grade/Status: HALTED — verdict UNCALIBRATED_VS_LIVE; MRC does not measure the production path
+- Files: (none created) | tests/performance_tests.rs, src/core/telemetry/mod.rs, src/core/telemetry/report.rs, src/render/engine/pipeline.rs, tasks.md
+- Deviation Log: NONE — no mid-phase HALT/approval exchange occurred.
+- Commit: see 6b
+
+```yaml
+phase: 2
+geometry: { w: 4096, h: 2160, realism: 4, font_size: 16, streams: 163, distinct_sizes_per_frame: 162 }
+mrc:
+  dev:     { mean_ms: 609.797, p50: 606.102, p95: 638.649, frame1: 676.360, frame40: 608.867 }
+  release: { mean_ms: 610.457, p50: 603.099, p95: 674.958, frame1: 654.596, frame40: 602.518 }
+control:
+  dev:     { mean_ms: 8.818 }
+  release: { mean_ms: 8.435 }
+cairo_rest_ms:            # S-13a, one 4096x2160 surface, release
+  clear: 2.6624
+  rain_update: 0.0031
+  subtotal: 2.6655
+  note: "metrics glow not included — needs a laid-out panel; folded into the live identity instead"
+warmup_ratio: 0.92        # frame40/frame1 release — no convergence, AC3 satisfied
+calibration:
+  dev_mrc_in_500_900: true
+  dev_ratio_vs_control: 69.2      # gate >= 5
+  r06_holds: true                 # production draw, varying sizes, primed, no synthetic loop
+  calibrated: true                # AC0 PASSES against the investigation
+x_live:
+  mrc_release_mean_ms: 610.457
+  threshold_ms: 25
+  tripped: true
+  production_rain_draw_4k_ms: 10.0030     # measured IN-PROCESS, 21854 calls over 12 min
+  divergence_factor: 61
+x1_fires: null            # not evaluated — X-LIVE tripped
+x2_fires: false           # MRC 610.457 vs control 8.435 = 72x apart, not within 20%
+verdict: UNCALIBRATED_VS_LIVE
+phase_3: BLOCKED
+```
+
+### Live steady-state identity (12-minute run, t>=120 s)
+
+```yaml
+cpu_pct: 62.34            # 11 consecutive 60 s buckets, flat (61.16 - 66.30)
+fps: 30.2                 # 362 samples over 12 min, NO decay
+ms_per_tick: 20.64
+components_per_tick:
+  rain_draw_4096x2160: 10.0030
+  rain_draw_1920x1080: 4.2883
+  clear_x2: 3.29
+  present_x2: 1.8473
+  accounted: 19.43        # vs 20.64 observed — closes within 6%
+rain_share_pct: 43        # of the 62.34
+at_target_fps_1_pct: 2.06 # S-04 gate is 3%
+```
+
+### Findings
+
+1. **AC0 PASSES, X-LIVE TRIPS.** The MRC faithfully reproduces the *investigation* (609.8 ms dev,
+   inside [500,900], 69.2x its control) and simultaneously contradicts the *substrate* by 61x. This
+   is precisely the case AC0 alone could not catch and X-LIVE was added for. Phase 3 is BLOCKED.
+2. **Root cause of the MRC's error: `Config::default()` is not production-shaped.** Live
+   `rain_speed` is **0.1**; the default is **1.0**. The priming loop ran the fall simulation at 10x
+   real speed. R-06 requires production-shaped inputs; defaults were substituted and called
+   production-shaped — the same substitution the deleted Mock Trap made, inside the test written to
+   replace it. **This alone does not explain a 61x gap** and the remaining diagnosis is open.
+3. **A-01 is confirmed falsified, and the Phase 1 reading stands.** fps is 30.2 and flat across 12
+   minutes with no decay. The earlier concern that 30.2 was a pre-convergence artifact is refuted:
+   CPU converges by t=120 s and fps never moves.
+4. **The Phase 1 AC2 "sysinfo converges" note was wrong.** The 28.0 -> 54.4% ramp was the overlay
+   genuinely getting more expensive as rain filled the screen, not an averaging artifact. Corrected
+   here rather than left standing.
+5. **F1's direction survives; its magnitude does not.** Rain is 43% of the 62% — the dominant cost
+   centre, as diagnosed. But it is ~14.3 ms/tick at 30 fps, not ~750 ms/frame at 1.3 fps. Every
+   frame-budget number derived from the 750 ms figure is wrong by ~60x.
+6. **S-04 is reachable by frame rate alone.** 20.64 ms/tick at `target_fps=1` = **2.06%**, under the
+   3% gate, with the rain path untouched. This is now measured rather than projected.

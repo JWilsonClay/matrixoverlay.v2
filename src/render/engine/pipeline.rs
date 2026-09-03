@@ -32,7 +32,18 @@ impl Renderer {
         self.clear(&cr)?;
         self.rain.update(dt, self.width, self.height, config);
         self.visual_elements.borrow_mut().clear();
-        if config.cosmetics.rain_mode == "fall" { self.rain.draw(&cr, self.width as f64, self.height as f64, *self.frames.borrow(), config)?; }
+        if config.cosmetics.rain_mode == "fall" {
+            // [X-LIVE] Time the production rain draw when debug metrics are on, so
+            // the MRC's figure can be reconciled against the running substrate.
+            // Inert otherwise: one env lookup per frame, no allocation, no logging.
+            let dbg = std::env::var_os("MATRIX_OVERLAY_DEBUG_METRICS").is_some();
+            let t = if dbg { Some(std::time::Instant::now()) } else { None };
+            self.rain.draw(&cr, self.width as f64, self.height as f64, *self.frames.borrow(), config)?;
+            if let Some(t) = t {
+                crate::core::telemetry::record_rain_draw(
+                    self.width as u16, self.height as u16, t.elapsed().as_nanos() as u64);
+            }
+        }
         self.draw_metrics(&cr, config, metrics)?;
         drop(cr);
         self.presenter.present(conn, window)?;

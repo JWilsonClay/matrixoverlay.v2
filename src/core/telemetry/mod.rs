@@ -1,4 +1,4 @@
-// src/core/telemetry.rs
+// src/core/telemetry/mod.rs
 //! Present-path telemetry substrate (Phase 1 — S-06 and S-13b).
 //!
 //! Two instruments live here, both written by the presentation layer and read
@@ -15,6 +15,9 @@
 //! same cost. Accumulated internally and printed ONCE at exit: a log line on the
 //! path being measured is a new cost centre inside the measurement, and would
 //! inflate the very number S-13b exists to establish.
+
+pub mod report;
+pub use self::report::summary;
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -82,6 +85,24 @@ pub fn record_present(w: u16, h: u16, put_image_ns: u64, gc_ns: u64) {
 /// Monotonic count of successful presents. Source of truth for the `fps` metric.
 pub fn present_count() -> u64 { PRESENT_COUNT.load(Ordering::Relaxed) }
 
+/// Accumulated in-process cost of `RainManager::draw`, per CRTC geometry.
+/// Written only when MATRIX_OVERLAY_DEBUG_METRICS is set (X-LIVE reconciliation).
+static RAIN_DRAW: Mutex<BTreeMap<String, (u64, u64)>> = Mutex::new(BTreeMap::new());
+
+/// Record one production `rain.draw` call. Nanoseconds; never logs.
+pub fn record_rain_draw(w: u16, h: u16, ns: u64) {
+    if let Ok(mut m) = RAIN_DRAW.lock() {
+        let e = m.entry(geom_key(w, h)).or_insert((0, 0));
+        e.0 = e.0.saturating_add(ns);
+        e.1 = e.1.saturating_add(1);
+    }
+}
+
+/// Snapshot of per-CRTC `rain.draw` cost.
+pub fn rain_draw_snapshot() -> BTreeMap<String, (u64, u64)> {
+    RAIN_DRAW.lock().map(|m| m.clone()).unwrap_or_default()
+}
+
 /// Number of distinct CRTC geometries that have presented at least once.
 ///
 /// One render tick presents once per monitor, so `PRESENT_COUNT` is the frame
@@ -96,63 +117,3 @@ pub fn timings_snapshot() -> BTreeMap<String, GeomTimings> {
     PRESENT_TIMINGS.lock().map(|m| m.clone()).unwrap_or_default()
 }
 
-fn mean_ms(total_ns: u64, n: u64) -> f64 {
-    if n == 0 { 0.0 } else { total_ns as f64 / n as f64 / 1_000_000.0 }
-}
-
-/// Render the S-13b summary. Printed exactly once, at shutdown.
-pub fn summary() -> String {
-    let snap = timings_snapshot();
-    let mut out = String::from(
-        "\n=== S-13b — X-side per-frame cost, per CRTC (means, ms) ===\n\
-         geometry        presents   pre_draw   put_image         gc       total\n",
-    );
-    if snap.is_empty() {
-        out.push_str("  (no presents recorded)\n");
-        return out;
-    }
-    let mut grand = 0.0;
-    for (geom, t) in &snap {
-        let pre = mean_ms(t.pre_draw_ns, t.pre_draws);
-        let put = mean_ms(t.put_image_ns, t.presents);
-        let gc = mean_ms(t.gc_ns, t.presents);
-        let total = pre + put + gc;
-        grand += total;
-        out.push_str(&format!(
-            "{:<15} {:>8} {:>10.4} {:>11.4} {:>10.4} {:>11.4}\n",
-            geom, t.presents, pre, put, gc, total
-        ));
-    }
-    out.push_str(&format!(
-        "present_ms summed across CRTCs: {:.4} ms/frame   (total presents: {})\n",
-        grand,
-        present_count()
-    ));
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// [S-13b] mean_ms converts accumulated nanoseconds to a per-event mean in ms,
-    /// and must not divide by zero when a slot recorded nothing.
-    #[test]
-    fn mean_ms_converts_and_guards_zero() {
-        assert_eq!(mean_ms(0, 0), 0.0);
-        assert!((mean_ms(1_000_000, 1) - 1.0).abs() < 1e-9);
-        // The live Phase 1 reading: 4096x2160 pre_draw averaged 1.1962 ms.
-        assert!((mean_ms(1_196_200 * 100, 100) - 1.1962).abs() < 1e-6);
-    }
-
-    /// [S-06] One render tick presents once per CRTC, so the raw counter runs at
-    /// `fps * crtcs`. This is the arithmetic `FpsCollector` applies; the live run
-    /// produced 18301 presents over ~303 s across 2 CRTCs = 30.2 fps, not 60.4.
-    #[test]
-    fn present_count_is_per_crtc_not_per_frame() {
-        let raw_rate: f64 = 18301.0 / 303.0;
-        assert!((raw_rate - 60.4).abs() < 0.2, "raw rate {}", raw_rate);
-        let frame_rate: f64 = raw_rate / 2.0;
-        assert!((frame_rate - 30.2).abs() < 0.2, "frame rate {}", frame_rate);
-    }
-}
