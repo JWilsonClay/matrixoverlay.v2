@@ -51,6 +51,24 @@ pub fn spawn_metrics_thread(config: &Config) -> (Arc<Mutex<SharedMetrics>>, Arc<
             let mut frame = std::collections::HashMap::new();
             for c in &mut colls { frame.extend(c.collect()); }
 
+            // [1.8] Debug readback for S-03/S-06 verification. Entirely inert unless
+            // MATRIX_OVERLAY_DEBUG_METRICS is set in the environment — no config
+            // field, nothing written to disk, nothing to leave switched on by
+            // accident. Prints the same values the overlay renders, so an external
+            // check can compare them against Method M-1 and a wall-clock count
+            // without reading the screen or mutating the user's config.
+            if std::env::var_os("MATRIX_OVERLAY_DEBUG_METRICS").is_some() {
+                let mut line = String::from("[debug-metrics]");
+                let mut keys: Vec<_> = frame.keys().cloned().collect();
+                keys.sort();
+                for k in keys {
+                    if let Some(v) = frame.get(&k) {
+                        line.push_str(&format!(" {}={:?}", k.as_str(), v));
+                    }
+                }
+                println!("{}", line);
+            }
+
             if let Ok(mut sh) = s_clone.lock() {
                 sh.data = MetricData { values: frame };
                 sh.timestamp = Instant::now();

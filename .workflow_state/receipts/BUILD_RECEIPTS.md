@@ -48,7 +48,7 @@ a01:
   inferred_fps: 1.3
   measured_fps: 30.2
   falsified: true           # off by ~23x
-verdict: UNCLASSIFIED_SEE_NOTE   # X-3 misses; A-01 falsified; §1.9 has no branch for this
+verdict: F1_STANDS_REDERIVE   # round-6 §1.9 cell: fps>=15 with low present budget = Branch 1 at measured rate
 ```
 
 ### Notes
@@ -67,3 +67,36 @@ verdict: UNCLASSIFIED_SEE_NOTE   # X-3 misses; A-01 falsified; §1.9 has no bran
    hypothetical.
 4. **The defect is live and reproducible on the fresh binary:** 59.54% of one core, versus the
    60.7% historical figure. Phase 1's changes did not perturb it.
+
+### Phase 1 — round-6 closure (task 1.8, AC2/AC3 met)
+
+```yaml
+phase: 1
+closure: 2026-09-03
+run: { window_s: 30.005, env: "MATRIX_OVERLAY_DEBUG_METRICS=1", binary: "./target/release/matrix-overlay" }
+ac2:
+  m1_cpu_pct: 42.8596
+  overlay_cpu_mean_matched_window: 42.02
+  delta_pp: -0.84            # gate +/-1.0  -> MET
+  raw_all_17_samples_delta_pp: -2.56   # fails; window mismatch, not normalization
+  old_code_would_have_shown: 2.63      # -40.23 pp vs M-1: the F2 defect
+  note: >
+    sysinfo process CPU CONVERGES toward the true rate rather than reporting an
+    instantaneous one (samples ramp 28.0 -> 54.4 over 34 s). Same family as
+    `ps -o pcpu`, which M-1 exists to avoid. S-03 checks must use matched
+    windows and allow warm-up.
+ac3:
+  wallclock_presents_per_crtc: 1016
+  wallclock_fps: 29.9
+  metric_fps_mean: 30.39
+  delta_pct: +1.7            # gate +/-10  -> MET
+present_ms_30s:
+  "4096x2160": { pre_draw: 1.1278, put_image: 0.0014, gc: 0.0149, total: 1.1441 }
+  "1920x1080": { pre_draw: 0.3356, put_image: 0.0011, gc: 0.0111, total: 0.3478 }
+  summed: 1.4919             # vs 1.6051 over the 300 s run — stable across runs
+acceptance: { AC1: MET, AC2: MET, AC3: MET, AC4: MET, AC5: MET, AC6: ANSWERED }
+verdict: F1_STANDS_REDERIVE
+status: PHASE COMPLETE
+```
+
+- Grade/Status: PHASE COMPLETE — 10/10 tasks, 6/6 acceptance criteria

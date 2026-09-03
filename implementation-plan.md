@@ -78,6 +78,7 @@ The campaign closes all three.
 | **F8** | `rain_mode` clobbered at startup — user's configured mode is discarded on every launch | [main.rs:28](src/core/main.rs#L28) |
 | **F9** | Per-frame cost outside `RainManager::draw` is unmeasured (clear, glow, present, ×2 monitors) | [pipeline.rs:28-38](src/render/engine/pipeline.rs#L28-L38), [shm.rs:114-146](src/render/engine/presentation/shm.rs#L114-L146) |
 | **MT-2** | Mock Traps outside `performance_tests.rs` — ASD flicker test, empty predictability test, Criterion bench | [asd_tests.rs:42-69](tests/asd_tests.rs#L42-L69), [render_bench.rs:17-32](benches/render_bench.rs#L17-L32) |
+| **MT-3** | `tests/metrics_tests.rs` has never compiled — calls a nonexistent `NvidiaSmiCollector::new_with_command`; zero coverage for an unknown period | [metrics_tests.rs](tests/metrics_tests.rs), [nvidia.rs:11](src/metrics/collectors/nvidia.rs#L11) |
 | **GL-2** | Ghost Logic beyond `perf_preset`: `show_monitor_label`, `build_logging_enabled`, dead `core/timer.rs` | [types.rs:20](src/core/config/types.rs#L20), [types.rs:130](src/core/config/types.rs#L130), [timer.rs](src/core/timer.rs) |
 
 Plus Option F architecture: glyph atlas, frame governor, damage-based rendering, `SharedMetrics`
@@ -370,6 +371,14 @@ Phase 2/3 stop, before Phase 3 is permitted to open.**
 | **X-2** | `--release` MRC mean vs the single-size control | **within 20% of each other** | A-02 is false *even if both are slow*. The cost is glyph volume or fill rate, not font-cache eviction. Bucketing and the atlas buy the campaign nothing. |
 | **X-3** | Phase 1 live `fps` **and** the present budget | `fps ≥ 15` (frames finishing inside the 33 ms tick) **and** `(present_ms_hdmi + present_ms_edp) × fps ÷ 10 ≥ 40` | Present × rate × two CRTCs already accounts for the 61%. F1 is at most a contributor, not the root cause. |
 
+**`fps ≥ 15` with `present_budget_pct < 40` is Branch 1 at the measured rate — X-3 does not fire.**
+*(Added round-6, from Phase 1's actual reading: 30.2 fps, 4.85% present budget.)* This cell means the
+loop is running at the hardcoded 33 ms tick and present is cheap, so the cost is per-frame Cairo work
+multiplied by rate — the bin F1 *would* occupy if it is expensive. **The cell does not classify F1
+either way.** What it does establish is that A-01 is falsified and the Phase 5 budget must be
+re-derived at the measured rate. Receipt verdict: `F1_STANDS_REDERIVE`. No new falsifier and no new
+enum value: X-1 and X-2 remain the only tests of the F1 diagnosis itself.
+
 **`fps ∈ (2, 15)` is Branch 1, not a fourth falsifier.** It means the live rate is not the inferred
 1.3; it does not mean font-cache eviction is absent. Re-derive the Phase 5–6 arithmetic, then open
 Phase 3 — provided X-1 and X-2 both miss. Re-derivation and falsification are different verdicts and
@@ -388,6 +397,28 @@ wrong, fix the test"; X-1 reads "release ≤ 20 ms ⇒ the diagnosis is wrong, h
 thing that separates those two readings is a calibrated slow run on the same test — **Phase 2 AC0**.
 X-1 may not be honored until AC0 returns CALIBRATED. An UNCALIBRATED verdict means "this is not the
 workload we diagnosed", not "F1 is false": fix the test, do not move the threshold, do not open Phase 3.
+
+### X-LIVE — live-agreement rider on the MRC (added round-6)
+
+AC0 calibrates the MRC against the **investigation** (500–900 ms dev-profile anchor). It cannot catch
+an MRC that faithfully measures something *production does not do* — and Phase 1's live data makes
+that a live possibility rather than a hypothetical.
+
+**Rule.** Once the `--release` MRC exists: if `mrc.release.mean_ms > 25`, the verdict is
+**`UNCALIBRATED_VS_LIVE`**. Do **not** honor X-1. Do **not** open Phase 3. Fix the test — never move
+the threshold.
+
+**Why 25 ms.** The MRC times `RainManager::draw` on **one** surface. The live tick is **19.71 ms
+total**, and that budget already pays for present, the second monitor, `clear()`, `rain.update` and
+the metrics glow. A 4K draw costing 25 ms or more cannot coexist with a 19.71 ms tick — the two
+readings would be describing different programs.
+
+**On the ~750 ms figure.** It is not the same measurement as the live 18.11 ms: dev profile vs
+release, `draw`-only vs full tick, one 4K surface vs two CRTCs. But 750 ms per frame inside a process
+observed at **30.2 fps** is physically impossible — 750 ms would cap the loop near 1.3 fps, which is
+exactly the inference A-01 made. **That number was the 1.3 fps inference talking to itself.** AC0
+still tests identity against the investigation; X-LIVE tests identity against the running substrate.
+Both must hold before X-1 means anything.
 
 A falsified F1 does **not** invalidate the campaign's instrumentation work. Phases 1 and 2 stand: the
 `overlay_cpu` fix, the `fps` metric, the disarmed Mock Trap, S-13a and S-13b are all independently

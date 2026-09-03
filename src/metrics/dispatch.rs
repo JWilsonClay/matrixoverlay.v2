@@ -45,9 +45,10 @@ pub fn init_collectors(config: &Config, sys_manager: Arc<Mutex<SysinfoManager>>)
         collectors.push(Box::new(OverlayCpuCollector::new(sys_manager.clone())));
     }
     
-    if required.contains(&MetricId::Fps) {
-        collectors.push(Box::new(FpsCollector::new()));
-    }
+    // Always registered: `fps` is an instrument, not a user-chosen metric. Gating
+    // it on the config metrics list made S-06 unverifiable on any config that did
+    // not happen to list it — which is every config, since the field is new.
+    collectors.push(Box::new(FpsCollector::new()));
 
     collectors.push(Box::new(DateCollector));
     collectors
