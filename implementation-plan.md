@@ -126,7 +126,7 @@ Every criterion below is a command or a reading, not a judgment.
 | **S-11** | No config regression | Load the user's existing `config.json` unmodified | Parses without error; `deny_unknown_fields` satisfied |
 | **S-12** | Deployed binary contains the campaign's work | `cmp ~/.local/bin/matrix-overlay target/release/matrix-overlay` after `install.sh`; record the built git sha | Byte-identical to the just-built release binary |
 | **S-13a** | Cairo-side per-frame cost outside `RainManager::draw` is measured — `clear()`, `rain.update`, metrics glow | Instrumented at 4096×2160 inside the **Phase 2** MRC harness | `cairo_rest_ms` recorded; feeds the budget identity below |
-| **S-13b** | X-side per-frame cost is measured — `pre_draw`'s `GetInputFocus` round-trip, `ShmPutImage`, `CreateGc`/`FreeGc`, **per monitor** | Instrumented on the **Phase 1** temporary `cargo run --release`, against a real X connection and real RandR geometry | `present_ms` recorded **per CRTC**; feeds the budget identity below |
+| **S-13b** | X-side per-frame cost is measured — `pre_draw`'s `GetInputFocus` round-trip, `ShmPutImage`, `CreateGc`/`FreeGc`, **per monitor** | Instrumented on the **Phase 1** temporary run: `cargo build --release`, then `./target/release/matrix-overlay` executed **directly** (never via `cargo run` — see the pid rule in Phase 1 AC2), against a real X connection and real RandR geometry | `present_ms` recorded **per CRTC**; feeds the budget identity below |
 
 **S-04 is the campaign's definition of done.** Everything else is a means to it.
 
@@ -151,10 +151,15 @@ raw tick values, not only the percentage.
 ### Budget identity (binding on Phase 5 and Phase 8)
 
 ```
-cpu_pct_of_one_core  ≈  (rain_ms + rest_ms) × target_fps × monitors ÷ 10
+cpu_pct_of_one_core  ≈  (rain_ms + cairo_rest_ms) × fps × monitors ÷ 10      <- per-surface work
+                      + (present_ms_hdmi + present_ms_edp) × fps ÷ 10        <- already per-CRTC
 ```
 
-Where `rest_ms = cairo_rest_ms (S-13a) + present_ms (S-13b)` and `monitors` is **2** on this host
+**Round-4 correction — the single-line form double-counted present.** `cairo_rest_ms` (S-13a) is
+measured once, on one surface in the MRC harness, so it scales by `monitors`. `present_ms` (S-13b) is
+measured **separately for each CRTC** and the two are already summed, so scaling that sum by `monitors`
+again counts every present twice. X-3 in §1.9 already uses the second line alone; Phase 5 AC6 must use
+both. `monitors` is **2** on this host
 (4096×2160 HDMI-1-0 + 1920×1080 eDP, both driven by
 [window/mod.rs:48-83](src/core/window/mod.rs#L48-L83) via RandR).
 
@@ -263,7 +268,10 @@ anything. Red-then-green is the anti-Mock-Trap mechanism.
   and `fps`), Phase 3 AC4 (Z-depth screenshots), Phase 5 AC5 (motion sign-off), Phase 7 AC1 (Pulse CPU),
   Phase 8 AC1 (visible render change), all of Phase 9. Everything else — the MRC, unit tests, config
   fixtures — verifies headlessly.
-- **Phases 1–8 use a temporary foreground `cargo run --release`** for their live ACs. That binary must
+- **Phases 1–8 use a temporary foreground run of the release binary** for their live ACs:
+  `cargo build --release`, then execute `./target/release/matrix-overlay` **directly**. **`cargo run`
+  is forbidden for M-1 and S-13b** — it interposes cargo as the parent, so `$!` and any naive pid
+  capture yield cargo rather than the overlay, and the sample reads ~0%. That binary must
   not be copied to `~/.local/bin/`, must not touch autostart, and must not terminate the running
   overlay (pid 2462 today). Replacing the deployed binary and restarting the user's overlay happens
   **only in Phase 9**, under C-06 approval. Run the temporary instance alongside or after manually
@@ -353,13 +361,28 @@ Phase 2/3 stop, before Phase 3 is permitted to open.**
 
 | # | Reading | Threshold | What it means |
 |:--:|---|---|---|
-| **X-1** | `--release` MRC mean, on a test that still calls production `RainManager::draw` with **varying** sizes at 4096×2160 (R-06 must hold) | **≤ 20 ms/frame** | The ~750 ms figure was a dev-profile artifact. Phase 3 has nothing to fix that could explain 61%. **Do not open Phase 3.** Re-center on `present_ms × fps × 2`. |
+| **X-1** | `--release` MRC mean — **only if the MRC is CALIBRATED per Phase 2 AC0** | **≤ 20 ms/frame** | The ~750 ms figure was a dev-profile artifact. Phase 3 has nothing to fix that could explain 61%. **Do not open Phase 3.** Re-center on `present_ms × fps × 2`. |
 | **X-2** | `--release` MRC mean vs the single-size control | **within 20% of each other** | A-02 is false *even if both are slow*. The cost is glyph volume or fill rate, not font-cache eviction. Bucketing and the atlas buy the campaign nothing. |
 | **X-3** | Phase 1 live `fps` **and** the present budget | `fps ≥ 15` (frames finishing inside the 33 ms tick) **and** `(present_ms_hdmi + present_ms_edp) × fps ÷ 10 ≥ 40` | Present × rate × two CRTCs already accounts for the 61%. F1 is at most a contributor, not the root cause. |
+
+**`fps ∈ (2, 15)` is Branch 1, not a fourth falsifier.** It means the live rate is not the inferred
+1.3; it does not mean font-cache eviction is absent. Re-derive the Phase 5–6 arithmetic, then open
+Phase 3 — provided X-1 and X-2 both miss. Re-derivation and falsification are different verdicts and
+this band gets the former.
 
 **F1 stands, and the campaign continues into Phase 3, only if all three hold:** the `--release` MRC is
 **> 20 ms**, the single-size control is **several times cheaper** than it, and live `fps` is **~1–2**.
 Carry the measured numbers forward into the Phase 5 budget identity (§1.3) and proceed.
+
+**X-1 is gated on calibration (round-4 audit).** It is a *fast-green* falsifier, and R-06 only guards
+the opposite direction — a synthetic loop producing a slow, falsely-confident number. Nothing guarded
+against a subtly wrong MRC (wrong geometry, streams not primed to steady state, sizes not actually
+varying) producing a fast green reading that halts a **correct** diagnosis. Worse, Phase 2 AC1 and X-1
+draw opposite conclusions from the identical observation: AC1 reads "release ≤ 20 ms ⇒ the test is
+wrong, fix the test"; X-1 reads "release ≤ 20 ms ⇒ the diagnosis is wrong, halt Phase 3." The only
+thing that separates those two readings is a calibrated slow run on the same test — **Phase 2 AC0**.
+X-1 may not be honored until AC0 returns CALIBRATED. An UNCALIBRATED verdict means "this is not the
+workload we diagnosed", not "F1 is false": fix the test, do not move the threshold, do not open Phase 3.
 
 A falsified F1 does **not** invalidate the campaign's instrumentation work. Phases 1 and 2 stand: the
 `overlay_cpu` fix, the `fps` metric, the disarmed Mock Trap, S-13a and S-13b are all independently
@@ -442,7 +465,7 @@ the next agent re-learning this.
 
 | Trigger | Branch |
 |---|---|
-| Phase 1's fps metric shows the live rate is **not** ~1.3 fps | A-01 is falsified. F1 stands (independently measured), but re-derive the Phase 5–6 frame budget before proceeding. Do not silently continue on stale arithmetic. |
+| Phase 1's fps metric shows the live rate is **not** ~1.3 fps — including the `fps ∈ (2, 15)` band | A-01 is falsified. **Re-derive the Phase 5–6 frame budget before proceeding**; do not silently continue on stale arithmetic. **F1 does not stand unconditionally here** *(round-4 correction)* — it stands in this band only if §1.9's X-1 and X-2 both miss. A wrong A-01 is a re-derivation, not a falsification; the falsifiers are X-1/X-2/X-3 and nothing else. |
 | Phase 3 user sign-off **rejects** the bucketed Z-depth (R-01) | Raise bucket count and re-present. If still rejected, skip to Phase 4 — the atlas supports far more buckets at lower cost, dissolving the trade-off. |
 | Phases 3–5 already clear S-04 with margin | **Sequel:** Phase 6 becomes optional. Consult the user before spending a day on architecture the CPU budget no longer requires. |
 | Atlas memory exceeds a sane cap (R-02) | Fall back to Phase 3's persistent-layout approach with a reduced bucket count. S-01 still holds; S-02 is waived with the reason recorded. |
@@ -630,6 +653,48 @@ the campaign at the Phase 2/3 stop. A falsified F1 does not invalidate Phases 1�
 the disarmed Mock Trap and both S-13 halves stand on their own.
 
 **Status: Phase 1 is authorized to open.** Scope remains Phases 1 and 2, then the mandatory stop.
+
+### Round 4 — final pre-execution pass, absorbed 2026-09-03
+
+Three substantive items, then Phase 1 opens.
+
+**An arithmetic error in the budget identity — present was double-counted.** The single-line form
+`(rain_ms + rest_ms) × fps × monitors ÷ 10` folded `present_ms` into `rest_ms` and then multiplied the
+whole thing by `monitors`. But `present_ms` is measured **per CRTC** and the two figures are already
+summed, so scaling that sum by `monitors` counts every present twice — inflating the projection by
+roughly the present cost of one full monitor, in the one gate that decides the default frame rate. The
+identity is now two lines: per-surface work (`rain_ms + cairo_rest_ms`) scales by `monitors`;
+per-CRTC work (`present_ms_hdmi + present_ms_edp`) is summed and scales by `fps` alone. X-3 was
+already correct — it used the second line only — which is what surfaced the inconsistency.
+
+**Phase 2 AC0 — MRC calibration, binding on X-1.** X-1 is a *fast-green* falsifier, and R-06 guards
+only the opposite direction. The sharper form of the problem: **AC1 and X-1 draw opposite conclusions
+from the identical observation.** A `--release` MRC at ≤ 20 ms means, to AC1, "the test is wrong, fix
+the test"; to X-1 it means "the diagnosis is wrong, halt Phase 3." Nothing separated them. AC0 does:
+the same test must first reproduce **500–900 ms under the dev profile** and run **≥ 5× the dev
+control**, with R-06 confirmed by inspection. Only then is X-1 honored. The 500–900 window is the
+2026-09-03 investigation anchor *on this host*, not a universal constant — landing outside it says
+"this is not the workload we diagnosed", not "F1 is false". This turns the original investigation
+figure from a relic into a calibration instrument.
+
+**The `fps ∈ (2, 15)` band is Branch 1, not a fourth falsifier.** A live rate that is neither ~1.3 nor
+≥ 15 means A-01 was wrong; it says nothing about whether font-cache eviction is present. §2.5's
+Branch 1 previously implied F1 stood unconditionally whenever A-01 failed — corrected: in that band F1
+stands only if X-1 and X-2 both miss. Re-derivation and falsification are different verdicts, and the
+receipt's `verdict` field now distinguishes `F1_STANDS_REDERIVE` from `X1`/`X2`/`X3`.
+
+Also: every live-run instruction now reads `cargo build --release` then `./target/release/matrix-overlay`
+executed directly. `cargo run` is forbidden for M-1 and S-13b — it interposes cargo as the parent, and
+the pid capture yields cargo. Four sites still carried the old wording after the round-3 fix reached
+only the AC2 body.
+
+**A receipt schema was added to `tasks.md`** — append-only YAML per phase, with units declared and
+every field the budget identity consumes. Phase 5 AC6 runs far enough downstream that nobody present
+for this conversation will be reading it; the schema is what makes the identity recomputable from the
+receipt alone, and it carries the `verdict` enum that routes the Phase 2/3 stop.
+
+**Status: Phase 1 is authorized to open against this revision.** Scope is Phase 1, then Phase 2, then
+the §1.9 evaluation at the stop.
 
 ### Corrected in passing
 

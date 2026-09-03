@@ -511,3 +511,113 @@ If the MRC stays **> 20 ms**, the control is **several times cheaper**, and live
 - S-01 and Phase 3 AC1 still demand “≥ 40× from ~750 ms.” If the release MRC is 80 ms, that gate is 2 ms and unsatisfiable. Re-gate item, not a Phase 1 hold.
 
 **Phase 1 execution note:** do not use `cargo run --release & TESTPID=$!`. That pins cargo, not the overlay. Build first, run `target/release/matrix-overlay` directly, or parse the binary pid from a startup log / cargo’s children. Sample `/proc/$TESTPID/stat` on that pid.
+
+---
+
+∈ (2, 15) | F1 stands as a defect. A-01 is wrong. **Branch 1 only** — re-derive Phase 5 arithmetic, then open Phase 3. Not X-3-lite. |
+| MRC uncalibrated (see b) | Do not honor X-1. Fix the test. Do not open Phase 3. |
+
+Patch §1.9, after the X-3 row, one sentence:
+
+> `fps ∈ (2, 15)` is Branch 1, not a fourth falsifier. It means the live rate is not the inferred 1.3; it does not mean font-cache eviction is absent. Phase 3 still opens if X-1 and X-2 both miss.
+
+Patch §2.5 Branch 1 the same way. Delete the implication “F1 stands unconditionally when A-01 is wrong.” F1 stands in that band only if X-1 and X-2 miss.
+
+## 1. (b) calibration — add Phase 2 AC0. Required before X-1.
+
+X-1 is a fast-green falsifier. R-06 only guards the slow-fake direction (synthetic loop). AC1 currently contradicts X-1: AC1 says “release ≤ 20 ms ⇒ test is wrong, fix the test”; X-1 says “release ≤ 20 ms ⇒ diagnosis is wrong, halt Phase 3.” The only thing that distinguishes those is a calibrated slow run on the same test.
+
+```
+Phase 2 AC0 — MRC calibration (binding on X-1)
+  Run the identical test_rain_frame_cost_mrc under the dev profile.
+  CALIBRATED iff:
+    mrc.dev.mean_ms ∈ [500, 900]
+    AND mrc.dev.mean_ms ≥ 5 × control.dev.mean_ms
+    AND R-06 holds (production RainManager::draw, varying sizes, 4096×2160, realism=4)
+  If not CALIBRATED:
+    verdict = UNCALIBRATED
+    do not honor X-1
+    do not open Phase 3
+    fix the test (geometry / priming / size variance), do not move the threshold
+  X-1 fires only if CALIBRATED AND mrc.release.mean_ms ≤ 20
+```
+
+500–900 ms is the investigation anchor on this host, not a universal constant. Landing outside it is “this is not the workload we diagnosed,” not “F1 is false.”
+
+## 2. Receipt schema
+
+Append-only YAML blocks in `receipts/BUILD_RECEIPTS.md`. Units: ms = milliseconds, pct = percent of one core, ticks = `/proc/<pid>/stat` utime+stime ($14+$15).
+
+```yaml
+# ---- block: phase 1 ----
+phase: 1
+git_sha: "<hex>"
+binary: "./target/release/matrix-overlay"
+host: { nproc: 16, cpu_model: "<lscpu model name>" }
+monitors:
+  - { name: HDMI-1-0, w: 4096, h: 2160 }
+  - { name: eDP,      w: 1920, h: 1080 }
+deployed_pid: 2462          # excluded; do not sample
+test_pid: <int>             # MUST be the overlay binary, never cargo
+m1:
+  t0_ticks: <int>
+  t1_ticks: <int>
+  clk_tck: <int>            # getconf CLK_TCK
+  window_s: 300
+  cpu_pct: <float>          # 100 * (t1-t0) / clk_tck / window_s
+hud_cpu_onscreen: <float>
+s03_delta_pp: <float>       # hud_cpu_onscreen - m1.cpu_pct
+fps:
+  onscreen: <float>
+  wallclock_presents_10s: <int>
+  wallclock_fps: <float>    # wallclock_presents_10s / 10
+present_ms:                 # Instant around each call; accumulate; print once at exit
+  HDMI-1-0: { pre_draw: <float>, put_image: <float>, gc: <float>, total: <float>, n: <int> }
+  eDP:      { pre_draw: <float>, put_image: <float>, gc: <float>, total: <float>, n: <int> }
+x3:
+  fps: <float>              # use fps.wallclock_fps
+  present_budget_pct: <float>  # (hdmi.total + edp.total) * fps / 10
+  fires: <bool>             # fps >= 15 AND present_budget_pct >= 40
+
+# ---- block: phase 2 ----
+phase: 2
+git_sha: "<hex>"
+geometry: { w: 4096, h: 2160, realism: 4, font_size: 16, streams: <int>, distinct_sizes_per_frame: <int> }
+mrc:
+  dev:     { mean_ms: <float>, p50: <float>, p95: <float>, series: [<40 floats>] }
+  release: { mean_ms: <float>, p50: <float>, p95: <float>, series: [<40 floats>] }
+control:
+  dev:     { mean_ms: <float>, series: [<40 floats>] }
+  release: { mean_ms: <float>, series: [<40 floats>] }
+cairo_rest_ms: { clear: <float>, rain_update: <float>, glow: <float>, total: <float> }  # 4096×2160, one surface
+warmup_ratio: <float>       # release MRC frame40 / frame1
+calibration:
+  dev_mrc_in_500_900: <bool>
+  dev_ratio_vs_control: <float>
+  calibrated: <bool>
+x1_fires: <bool>            # calibrated AND mrc.release.mean_ms <= 20
+x2_fires: <bool>            # abs(mrc.rel - control.rel) / max(mrc.rel, control.rel) <= 0.20
+verdict: F1_STANDS | F1_STANDS_REDERIVE | X1 | X2 | X3 | UNCALIBRATED
+```
+
+Identity — replace the formula in §1.3 and Phase 5 AC6. Current text multiplies a per-CRTC (or summed) `present_ms` by `monitors` and double-counts present.
+
+```
+cpu_pct ≈ (rain_ms + cairo_rest_ms) * fps * monitors / 10
+        + (present_ms_hdmi + present_ms_edp) * fps / 10
+```
+
+`cairo_rest_ms` is one-surface (MRC harness). Multiply by `monitors`.
+`present_ms_*` are already per CRTC. Sum, then scale by fps only. Do not also × `monitors`.
+X-3 already uses the second line. AC6 must use both lines.
+
+## 3. Diff `d3f4204 → ab626d9`
+
+§1.9, AC6, AC5, pid correction, leftover four — applied correctly. Nothing weakened.
+
+Two lead-in mismatches left (apply with the patches above, then execute):
+
+1. `tasks.md` 1.7, `tasks.md` AC2 first sentence, `implementation-plan.md` S-13b row, `implementation-plan.md` §1.6 External — still say `cargo run --release`. AC2 body correctly says `cargo build --release` then `./target/release/matrix-overlay`. Change every live-run instruction to that pair. `cargo run` is forbidden for M-1 and S-13b.
+2. Phase 5 AC6 / §1.3 identity still does `(rain_ms + cairo_rest_ms + present_ms) × fps × monitors ÷ 10`. Replace with the two-line identity in §2.
+
+No other change required. After those two edits: open Phase 1 against `ab626d9`. Scope remains Phase 1 then Phase 2, then §1.9.
