@@ -11,5 +11,6 @@ pub mod init;
 pub mod threads;
 pub mod path_utils;
 pub mod timer;
+pub mod telemetry;
 pub mod update;
 pub mod version;

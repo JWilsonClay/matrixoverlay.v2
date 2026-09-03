@@ -29,7 +29,7 @@ pub enum MetricsCommand { UpdateConfig(Config), ForceRefresh }
 pub enum MetricId {
     CpuUsage, RamUsage, RamUsed, RamTotal, LoadAvg, Uptime, NetworkDetails, DiskUsage, 
     CpuTemp, FanSpeed, GpuTemp, GpuUtil, WeatherTemp, WeatherCondition, DayOfWeek, 
-    CodeDelta, OverlayCpu, LocationData, Custom(String),
+    CodeDelta, OverlayCpu, Fps, LocationData, Custom(String),
 }
 
 impl MetricId {
@@ -43,7 +43,8 @@ impl MetricId {
             "gpu_temp" => Some(Self::GpuTemp), "gpu_util" => Some(Self::GpuUtil),
             "weather_temp" => Some(Self::WeatherTemp), "weather_condition" => Some(Self::WeatherCondition),
             "day_of_week" => Some(Self::DayOfWeek), "code_delta" => Some(Self::CodeDelta),
-            "overlay_cpu" => Some(Self::OverlayCpu), "location_data" => Some(Self::LocationData),
+            "overlay_cpu" => Some(Self::OverlayCpu), "fps" => Some(Self::Fps),
+            "location_data" => Some(Self::LocationData),
             other => Some(Self::Custom(other.to_string())),
         }
     }
@@ -58,7 +59,8 @@ impl MetricId {
             Self::GpuTemp => "gpu_temp", Self::GpuUtil => "gpu_util",
             Self::WeatherTemp => "weather_temp", Self::WeatherCondition => "weather_condition",
             Self::DayOfWeek => "day_of_week", Self::CodeDelta => "code_delta",
-            Self::OverlayCpu => "overlay_cpu", Self::LocationData => "location_data",
+            Self::OverlayCpu => "overlay_cpu", Self::Fps => "fps",
+            Self::LocationData => "location_data",
             Self::Custom(s) => s.as_str(),
         }
     }
@@ -73,7 +75,8 @@ impl MetricId {
             Self::GpuTemp => "GPU Temp", Self::GpuUtil => "GPU Util",
             Self::WeatherTemp => "Weather", Self::WeatherCondition => "Cond",
             Self::DayOfWeek => "", Self::CodeDelta => "Git",
-            Self::OverlayCpu => "HUD CPU", Self::LocationData => "Loc",
+            Self::OverlayCpu => "HUD CPU", Self::Fps => "FPS",
+            Self::LocationData => "Loc",
             Self::Custom(_) => "Metric",
         }
     }

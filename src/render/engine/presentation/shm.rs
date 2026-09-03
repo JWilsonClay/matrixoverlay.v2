@@ -3,6 +3,7 @@ use anyhow::Result;
 use cairo::{Format, ImageSurface};
 use xcb::x;
 use super::Presenter;
+use crate::core::telemetry;
 
 // Wraps the raw SHM pointer so that ImageSurface::create_for_data can accept it.
 // No Drop impl — libc::shmdt in ShmPresenter::drop owns this memory. Adding a
@@ -99,6 +100,7 @@ impl Presenter for ShmPresenter {
     }
 
     fn pre_draw(&mut self, conn: &xcb::Connection) -> Result<()> {
+        let mut lap = telemetry::Lap::new();
         if self.frame_pending {
             // Force a synchronous round-trip. By the time the X server replies to
             // GetInputFocus it has sequentially processed all prior requests,
@@ -107,6 +109,7 @@ impl Presenter for ShmPresenter {
             conn.wait_for_reply(cookie)
                 .map_err(|e| anyhow::anyhow!("SHM sync failed: {:?}", e))?;
             self.frame_pending = false;
+            telemetry::record_pre_draw(self.width, self.height, lap.lap());
         }
         Ok(())
     }
@@ -116,12 +119,14 @@ impl Presenter for ShmPresenter {
         if let Some(ref surface) = self.surface {
             surface.flush();
         }
+        let mut lap = telemetry::Lap::new();
         let gc: x::Gcontext = conn.generate_id();
         conn.send_request(&x::CreateGc {
             cid: gc,
             drawable: x::Drawable::Window(window),
             value_list: &[],
         });
+        let gc_create_ns = lap.lap();
         // PutImage over SHM: the X server reads directly from the shared memory
         // segment — no pixel data travels over the socket.
         conn.send_request(&xcb::shm::PutImage {
@@ -141,8 +146,10 @@ impl Presenter for ShmPresenter {
             shmseg: self.shmseg,
             offset: 0,
         });
+        let put_image_ns = lap.lap();
         conn.send_request(&x::FreeGc { gc });
         let _ = conn.flush();
+        telemetry::record_present(self.width, self.height, put_image_ns, gc_create_ns + lap.lap());
         self.frame_pending = true;
         Ok(())
     }

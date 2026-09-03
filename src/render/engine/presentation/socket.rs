@@ -2,6 +2,7 @@ use anyhow::Result;
 use cairo::{Format, ImageSurface};
 use xcb::x;
 use super::Presenter;
+use crate::core::telemetry;
 
 pub struct SocketPresenter {
     surface: ImageSurface,
@@ -37,12 +38,14 @@ impl Presenter for SocketPresenter {
             .map_err(|e| anyhow::anyhow!("Cairo data access failed: {}", e))?;
         // PutImage wire header: 28 bytes (7 four-byte words). Subtract from budget.
         let stripe_height = (max_bytes.saturating_sub(28) / stride).max(1);
+        let mut lap = telemetry::Lap::new();
         let gc: x::Gcontext = conn.generate_id();
         conn.send_request(&x::CreateGc {
             cid: gc,
             drawable: x::Drawable::Window(window),
             value_list: &[],
         });
+        let gc_create_ns = lap.lap();
         let mut row = 0usize;
         while row < height {
             let rows_this_stripe = (row + stripe_height).min(height) - row;
@@ -62,7 +65,11 @@ impl Presenter for SocketPresenter {
             });
             row += stripe_height;
         }
+        let put_image_ns = lap.lap();
         conn.send_request(&x::FreeGc { gc });
+        // SocketPresenter has no pre_draw round-trip; only put_image and gc are
+        // attributable here. The geometry key keeps it separable from the SHM path.
+        telemetry::record_present(width, height as u16, put_image_ns, gc_create_ns + lap.lap());
         Ok(())
     }
 
