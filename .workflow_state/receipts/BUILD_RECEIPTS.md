@@ -661,3 +661,102 @@ line_caps: { presets: 122, handlers: 160, pipeline: 131, gui/mod: 104, gui/advan
 
 7. **Recorded, not fixed (unchanged):** `rain.update` still runs outside the `"fall"` gate in
    `pipeline.rs` — a Pulse leak that will matter in Phase 7 and costs 0.0031 ms today.
+
+## 2026-09-04 — /execute-build — Round 11: Phase 10 docs, rain.update gate, AC5 protocol
+- Phase/Stage: Phase 10 — Documentation; plus the `rain.update` gate
+- Grade/Status: **PHASE 10 TASKS COMPLETE. AC5 protocol WRITTEN, NOT EXECUTED — `ac5_user_signoff: pending`.**
+- Files: (none created) | src/render/engine/pipeline.rs, CLAUDE.md, docs/pitfalls.md, DevJournal.md
+- Deviation Log: **ONE — the AC5 viewing run was NOT launched.** See finding 4.
+- Commits: 07d922a (rain.update gate), cddf9a9 (docs)
+
+```yaml
+phase: 10
+git_sha: "cddf9a9"
+rain_update_gated: true
+claude_md:
+  clear_corrected: true            # "transparent" -> opaque black, with the date the prose was wrong
+  presentation_path_corrected: true # flat presentation.rs -> presentation/{mod,shm,socket}.rs
+  target_fps_documented: true       # default 1, clamp 1..=60, preset table, S04_AT_GATE series
+  modules_added: [config/presets.rs, telemetry/]
+  glyph_cache_invented: false
+pitfalls:
+  font_cache_entry: true           # both halves — lab 74x, live 1.25x
+  mock_trap_entry: true            # plus R-11, MT-3, flicker test, commented-out layout test
+  standing_rule_present: true      # four recurrences named
+  f8_origin_d2f61a1: true
+  c02_vs_gl2_delete: true
+  timer_rs_second_f4: true
+devjournal: true                   # does NOT say "S-04 passed"
+citation_unchanged: true           # concept.md §IV = 500 ms minimum; 1Hz/no-flashing = pitfalls.md:70-72
+ac5_protocol_written: true
+ac5_run_launched: false            # DEVIATION — see finding 4
+ac5_user_signoff: pending
+user_verdict: pending
+phase_7: SHUT
+phase_9: SHUT
+s04: AT_GATE
+s04_series: [3.0166, 2.9966, 2.9966]
+s04_mean: 3.0033
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
+tests: { lib: 11 pass, asd_tests: 5 pass, governor_tests: 6 pass }
+line_caps: { pipeline: 166 }
+```
+
+### AC5 — viewing protocol (written; awaiting the user)
+
+```bash
+cargo build --release || exit 1
+mkdir -p /tmp/mo-ac5-home/.config/matrix-overlay
+cp ~/.config/matrix-overlay/config.json /tmp/mo-ac5-home/.config/matrix-overlay/config.json
+# Medium is the default: target_fps=1, realism=4, rain_mode=fall.
+# The copied config has no target_fps field, so it defaults to 1 (C-02).
+HOME=/tmp/mo-ac5-home XDG_CONFIG_HOME=/tmp/mo-ac5 ./target/release/matrix-overlay
+# Ctrl-C, or: pkill -x matrix-overlay
+```
+
+Watch for ~30 s on **both** CRTCs — HDMI-1-0 (4096x2160) and eDP (1920x1080):
+
+1. Does 1 fps read as a **slow pulse of the desktop**, or as a **slideshow / stall**?
+2. Any **strobing or flashing**? (C-05; `docs/pitfalls.md:70-72` — "No flashing or blinking elements".)
+3. Is the **metrics panel readable** — does it look static rather than stuttering?
+
+Reply with exactly one line:
+
+```
+ac5_user_signoff: accepted
+ac5_user_signoff: rejected_want_2fps
+ac5_user_signoff: rejected_other <reason>
+```
+
+**If `rejected_want_2fps`:** render doubles to ~4.92% and the floor stays 0.5368%, so the whole
+process lands near **5.46%** — well over the 3.0 gate, and roughly 1.8x the current result. That is a
+new conversation about the gate, **not** a silent default bump.
+
+### Findings — Round 11
+
+1. **`rain.update` is now gated.** It costs 0.0031 ms and was carried as record-only through three
+   receipts, but it is cost with no output, and Phase 7 cannot measure S-05a honestly while a non-fall
+   mode still advances the fall simulation. Streams keep their positions across a mode switch —
+   `update` reseeds only on geometry or realism change — which is documented at the call site so the
+   resume behaviour is not mistaken for a bug later.
+
+2. **CLAUDE.md's clear was documented wrong, not implemented wrong.** Step 1 read "clear to
+   transparent" while the code has always used `Operator::Source` + `rgba(0,0,0,1.0)`. The prose is
+   corrected and dated; the clear itself is untouched. Notably this is the second-largest render term
+   (3.7088 ms/tick), so a reader working from the old prose would have mispriced the frame.
+
+3. **`glyph_cache.rs` was deliberately not added to the module map.** It was planned in Phase 3, Phase
+   3 is demoted, and the file does not exist. Documenting it would be Ghost Logic in the document that
+   exists to prevent it.
+
+4. **DEVIATION — the AC5 viewing run was not launched.** Round 11 permits ("may start") a throwaway-XDG
+   binary and leaving it running. I wrote the protocol and did not execute it. Reason: it puts a
+   persistent overlay on the user's live desktop, which is outward-facing and not something an
+   adjudication can authorize on the user's behalf — the user's own standing rule is that discussion,
+   including a third party's plan, is never itself authorization to execute. The command is one line
+   in the protocol above and is offered rather than run. Nothing was left running; `pgrep -x
+   matrix-overlay` is empty.
+
+5. **Citation left exactly as the round-2 audit set it.** `concept.md` §IV is the 500 ms minimum
+   update interval; "1Hz or 0.5Hz is sufficient" and "No flashing or blinking elements" are
+   `docs/pitfalls.md:70-72`. Not re-attributed while writing the new entries.
