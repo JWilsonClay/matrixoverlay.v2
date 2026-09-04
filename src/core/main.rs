@@ -46,8 +46,20 @@ pub fn run() -> Result<()> {
         anyhow::bail!("X11 Error: DISPLAY environment variable is not set. Matrix Overlay requires an active X session.");
     }
 
-    config.cosmetics.rain_mode = "fall".to_string();
-    
+    // [F8 — FIXED, round-10] This line used to read
+    //     config.cosmetics.rain_mode = "fall".to_string();
+    // and it silently overwrote whatever the user's config.json said, every
+    // start, making every non-fall mode unreachable. It entered the tree in
+    // `d2f61a1` (2026-02-28) commented "FORCE OVERRIDE: Ensure rain is enabled
+    // for verification" — a debugging override that was never removed. Its
+    // companion (`realism_scale = 8`, same commit, same comment) was cleaned up
+    // at some point; this one survived seven months.
+    //
+    // It is deleted rather than debug-gated: there is no reason to keep a
+    // config-clobbering switch, and Phase 7's S-05 cannot be measured while any
+    // form of it exists.
+    log::info!("Effective rain_mode after config load: {}", config.cosmetics.rain_mode);
+
     // 3. Spawn Metrics Hub
     let (metrics, shutdown, _metrics_handle, metrics_tx) = crate::metrics::spawn_metrics_thread(&config);
 
