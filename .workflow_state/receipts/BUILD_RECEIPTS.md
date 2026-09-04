@@ -760,3 +760,51 @@ new conversation about the gate, **not** a silent default bump.
 5. **Citation left exactly as the round-2 audit set it.** `concept.md` §IV is the 500 ms minimum
    update interval; "1Hz or 0.5Hz is sufficient" and "No flashing or blinking elements" are
    `docs/pitfalls.md:70-72`. Not re-attributed while writing the new entries.
+
+## 2026-09-04 — /execute-build — Round 12: AC5 viewing run launched
+- Phase/Stage: AC5 — human visual sign-off at `target_fps = 1`
+- Grade/Status: **RUN LAUNCHED AND LEFT RUNNING. `ac5_user_signoff: pending` — the field is the user's to write, not mine.**
+- Files: (none — no source change this pass)
+- Deviation Log: NONE. Round 11's deviation is closed: the user gave explicit authorization ("you may proceed with my authorization").
+- Commit: receipt only
+
+```yaml
+phase: ac5_launch
+git_sha: "02c8a41"
+test_pid: 1139923
+exe: /home/jwils/matrixoverlay.v2/target/release/matrix-overlay
+comm: matrix-overlay
+cmdline: "./target/release/matrix-overlay"      # pinned to the binary, never cargo
+blocked_by_existing_overlay: null               # pgrep -ax was empty at preflight
+throwaway_home: /tmp/mo-ac5-home
+xdg: /tmp/mo-ac5
+log: /tmp/mo-ac5/overlay.log
+pid_file: /tmp/mo-ac5/pid
+effective_rain_mode: fall                       # logged after load — F8 is gone
+target_fps: 1                                   # copied config has no field; C-02 default applied
+collectors_initialised: 10
+ac5_user_signoff: pending
+phase_7: SHUT
+phase_9: SHUT
+s04: AT_GATE
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
+```
+
+### Notes
+
+1. **Preflight was clean.** `pgrep -ax matrix-overlay` returned nothing, so no user overlay was
+   displaced and none was killed. The run is the only overlay on the display.
+2. **The pid is the binary.** `/proc/1139923/exe` resolves to `target/release/matrix-overlay` and
+   `comm` is `matrix-overlay` — not cargo. No child-walking was needed because the binary was launched
+   directly, per the campaign's three-times-burned pid rule.
+3. **Two campaign fixes are visible in the startup log itself.** `Effective rain_mode after config
+   load: fall` is the line that replaced F8's clobber — it now reports the config's value rather than
+   overwriting it. And the copied config carries no `target_fps` field, so C-02's
+   `#[serde(default)]` supplied **1**: the run is at Medium by default, which is the configuration
+   under test.
+4. **Stop it with `pkill -x matrix-overlay`** (or `kill $(cat /tmp/mo-ac5/pid)`). It is a throwaway
+   `$HOME`; nothing it writes touches the user's real config, and the user's `config.json` md5 is
+   unchanged.
+5. **I have not looked at the screen and will not interpret it.** AC5 is a human gate by construction;
+   an agent reporting that the rain looks calm would be the same class of defect this campaign spent
+   eleven rounds removing.
