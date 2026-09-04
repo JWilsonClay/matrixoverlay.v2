@@ -1,5 +1,6 @@
 // src/core/config/mod.rs
 pub mod defaults;
+pub mod presets;
 pub mod storage;
 pub mod validation;
 pub mod types;

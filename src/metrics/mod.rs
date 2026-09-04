@@ -4,7 +4,6 @@
 pub mod collectors;
 pub mod manager;
 pub mod dispatch;
-pub mod factory;
 
 use std::collections::HashMap;
 use std::time::Instant;

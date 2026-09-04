@@ -568,3 +568,96 @@ remainder (collectors + GTK + XCB)  0.5368 %
 
 8. **Recorded, not fixed (unchanged):** F8 (`main.rs` clobbers `rain_mode`), `rain.update` outside the
    `"fall"` gate.
+
+## 2026-09-04 — /execute-build — Round 10: S-04 exception, F8, Phase 8
+- Phase/Stage: Phase 8 — Performance Presets (Medium + Extreme); plus the S-04 written exception and the F8 fix
+- Grade/Status: **PHASE 8 TASKS COMPLETE (Minimal deferred). S-04 = `S04_AT_GATE`. S-05 amended. F8 FIXED.**
+- Files: src/core/config/presets.rs | implementation-plan.md, tasks.md, docs/pitfalls.md, src/core/main.rs, src/core/init.rs, src/core/mod.rs, src/core/config/mod.rs, src/core/threads/handlers.rs, src/render/engine/pipeline.rs, src/ui/gui/{mod,advanced,logic}.rs, src/metrics/mod.rs · DELETED: src/core/timer.rs, src/metrics/factory.rs
+- Deviation Log: NONE
+- Commits: 88b6f38 (docs), 13c1463 (F8), see 6b (Phase 8)
+
+```yaml
+phase: 8
+git_sha_base: "95e7bac"
+s04: AT_GATE
+s04_series: [3.0166, 2.9966, 2.9966]
+s04_mean: 3.0033
+s04_spread_pp: 0.020
+gate_numeral: 3.0                 # unchanged; 3.0166 not rounded down
+s05: AMENDED                      # 0.5% whole-process bound retired as unsatisfiable
+f8:
+  line_removed: true
+  git_log_S_reason: >
+    d2f61a1 (2026-02-28, "Finished Build PRE Release") introduced it under the
+    comment "FORCE OVERRIDE: Ensure rain is enabled for verification". A
+    debugging override, never removed. Its companion from the same commit and
+    comment (realism_scale = 8) was cleaned up; this one survived ~7 months.
+  in_process_survives_restart: true
+  evidence: >
+    Throwaway $HOME with rain_mode="pulse": logs "Effective rain_mode after
+    config load: pulse", and the telemetry summary contains NO X-LIVE section —
+    rain.draw was never called. Under the old line it would have drawn fall rain.
+presets:
+  medium:
+    writes_config: true           # target_fps=1 realism=4 glow=3 rain_mode=fall
+    live_wallclock_presents_per_crtc: 46      # over 45 s => 1.02 fps
+    live_metric_fps: 1.0
+    fps_unchanged_1: true
+  extreme:
+    writes_config: true           # target_fps=30 realism=10 glow=5 rain_mode=fall
+    live_metric_fps: "29.5 - 30.2 at steady state"
+    whole_run_wallclock_fps: 12.6 # DILUTED by startup before the first present; not the steady rate
+    label: "Extreme (exceeds the ambience budget)"
+    s04_exempt: true
+  minimal: DEFERRED               # needs Pulse Mode; button logs and does nothing. Screen NOT blanked.
+gl2:
+  perf_preset: wired              # READ in ui/gui/logic.rs:38 and ui/gui/advanced.rs:24
+  show_monitor_label: wired       # render/engine/pipeline.rs:120
+  build_logging_enabled: wired    # core/init.rs:22
+  timer_rs: deleted
+  factory_rs: deleted_with_timer
+ac5_user_signoff: pending
+phase_7: SHUT
+phase_9: SHUT
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
+tests: { lib: 11 pass, asd_tests: 5 pass, governor_tests: 6 pass }
+line_caps: { presets: 122, handlers: 160, pipeline: 131, gui/mod: 104, gui/advanced: 38, gui/logic: 48, main: 137, init: 110 }
+```
+
+### Findings — Round 10
+
+1. **`timer.rs` was a second, dead copy of the metrics loop — including the F4 bug.** It carried the
+   same `else { thread::sleep(Duration::from_millis(1)); }` fail-open that Phase 5 removed from the
+   tick thread. It had **no callers**; `factory.rs::create_collectors` had exactly one caller, and it
+   was `timer.rs`. Both deleted together, as GL-2 required deciding them together. Had Phase 5 not
+   found the fail-open in `threads/mod.rs` first, this file would have looked like the fix site.
+
+2. **Neither GL-2 flag could be deleted, and the reason is C-02.** `show_monitor_label` and
+   `build_logging_enabled` are both **present in the user's live `config.json`**. Removing either
+   field from the struct would make `#[serde(deny_unknown_fields)]` reject that file on the next
+   start — the config would fail to load, not degrade. "Wire or delete" therefore had only one safe
+   branch here, and both are wired. `show_monitor_label` is `false` in the user's config, so wiring it
+   changes nothing they will see.
+
+3. **The preset verification script initially re-derived the preset table in Python** — a second copy
+   of the production values, asserted against. That is the campaign's standing-rule defect for the
+   fourth time, caught before it ran. Split instead: the table is asserted by unit tests that call
+   production `presets::apply` directly, and the live script only *writes a config and watches
+   behaviour*, asserting nothing about the table.
+
+4. **Extreme's whole-run wall-clock rate (12.6 fps) is not its rate.** The 45 s run includes startup —
+   GTK init, window creation, the weather fetch — before the first present. Steady-state metric `fps`
+   reads **29.5–30.2** against a target of 30. Reported as both numbers rather than the flattering one.
+
+5. **Minimal does not blank the screen.** The button logs *"Minimal preset requires Pulse Mode
+   (Phase 7); not applied"* and returns; `presets::apply` returns `false` for it and mutates nothing.
+   The GUI label says "needs Pulse Mode — not yet available", so the control is honest rather than
+   inert-and-silent.
+
+6. **`clear`'s cost is why Phase 6.1 cannot close S-04, and this is now written into §2.5.** Damage
+   tracking skips the opaque paint only when the surface is *not* fully dirtied; falling rain dirties
+   all of 4096×2160 and 1920×1080 every tick. Phase 6.1 is a Pulse/static-mode lever, recorded as a
+   sequel there rather than against S-04.
+
+7. **Recorded, not fixed (unchanged):** `rain.update` still runs outside the `"fall"` gate in
+   `pipeline.rs` — a Pulse leak that will matter in Phase 7 and costs 0.0031 ms today.

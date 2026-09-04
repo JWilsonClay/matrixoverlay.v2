@@ -12,8 +12,18 @@ use crate::build_logger;
 pub fn init_logging(config: &Config) -> Result<()> {
     version::print_startup_info();
     
+    // [GL-2, Phase 8.7] `build_logging_enabled` had no reader anywhere in the
+    // tree — a stored, GUI-less, permanently-inert flag. It is wired here rather
+    // than deleted because the field already exists in users' `config.json` and
+    // `#[serde(deny_unknown_fields)]` (C-02) would reject those files the moment
+    // the struct lost it. It now does the obvious thing its name claims: gate
+    // the build-event log.
     if env::args().any(|a| a == "debug-build") {
-        build_logger::log_build_event("cargo build --release", &config.logging.log_path);
+        if config.logging.build_logging_enabled {
+            build_logger::log_build_event("cargo build --release", &config.logging.log_path);
+        } else {
+            eprintln!("build logging is disabled (logging.build_logging_enabled = false)");
+        }
         return Ok(());
     }
 

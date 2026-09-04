@@ -423,7 +423,7 @@ Performance Presets need in order to mean something.
 
 ## Phase 8: Wire the Performance Presets
 
-**STATUS: NOT STARTED** — LOE-4 · Resolves F5, F7 · Ghost Logic closure
+**STATUS: TASKS COMPLETE — Medium and Extreme wired and verified live; Minimal DEFERRED to Phase 7 (the button logs and changes nothing; the screen is not blanked). GL-2 closed: `perf_preset`, `show_monitor_label` and `build_logging_enabled` are all read; `timer.rs` and `factory.rs` deleted as dead. Phase 9 stays SHUT.**
 
 ### Objective
 Close the dead loop: three GUI buttons connected to nothing, writing to a config field read nowhere.

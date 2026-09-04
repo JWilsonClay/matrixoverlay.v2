@@ -15,6 +15,9 @@ use crate::core::config::Config;
 
 pub enum GuiEvent {
     Reload,
+    /// [Phase 8.1] A performance preset button was pressed. The overlay thread
+    /// applies the preset to the live config, persists it, and re-renders.
+    ApplyPreset(String),
     PurgeLogs,
     OpenConfig,
     UpdateAvailable(String),
@@ -74,6 +77,20 @@ impl ConfigWindow {
                 let _ = tx.send(GuiEvent::Reload);
             }
         });
+
+        // [Phase 8.1] Presets, same pattern as PurgeLogs. `Minimal` deliberately
+        // sends nothing: it needs Pulse Mode (Phase 7), and a Minimal that
+        // simply stopped drawing would blank the user's desktop rather than
+        // make it cheap.
+        let tx_min = self.event_tx.clone();
+        adv_w.0.connect_clicked(move |_| {
+            log::info!("Minimal preset requires Pulse Mode (Phase 7); not applied.");
+            let _ = &tx_min;
+        });
+        let tx_med = self.event_tx.clone();
+        adv_w.1.connect_clicked(move |_| { let _ = tx_med.send(GuiEvent::ApplyPreset("medium".into())); });
+        let tx_ext = self.event_tx.clone();
+        adv_w.2.connect_clicked(move |_| { let _ = tx_ext.send(GuiEvent::ApplyPreset("extreme".into())); });
 
         let tx_p = self.event_tx.clone();
         adv_w.4.connect_clicked(move |_| { let _ = tx_p.send(GuiEvent::PurgeLogs); });

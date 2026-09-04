@@ -32,6 +32,14 @@ pub fn update_config_from_widgets(
     new_config.cosmetics.occlusion_enabled = cos_w.5.is_active();
     new_config.cosmetics.border_enabled = cos_w.6.is_active();
 
+    // [Phase 8.4] An individual edit demotes the preset claim to "custom", so
+    // the label can never assert a configuration the user has since changed.
+    // This is also the READ of `perf_preset` that GL-2 required.
+    let claimed = new_config.cosmetics.perf_preset.clone();
+    if !crate::core::config::presets::matches(new_config, &claimed) {
+        new_config.cosmetics.perf_preset = "custom".to_string();
+    }
+
     // Weather
     new_config.weather.enabled = weath_w.0.is_active();
     new_config.weather.auto_location = weath_w.1.is_active();

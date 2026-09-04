@@ -108,7 +108,31 @@ impl Renderer {
         Ok(())
     }
 
+    /// [GL-2, Phase 8.7] `general.show_monitor_label` was stored, exposed in the
+    /// GUI, and read by nothing — the checkbox toggled a value with no effect.
+    /// Wired rather than deleted: the field is already present in users'
+    /// `config.json`, and `#[serde(deny_unknown_fields)]` (C-02) would reject
+    /// those files if the struct lost it.
+    ///
+    /// Drawn at the panel origin with the same glow the metrics use. Costs one
+    /// short string per frame per monitor, and only when the flag is on.
+    fn draw_monitor_label(&self, cr: &CairoContext, config: &Config) -> Result<()> {
+        if !config.general.show_monitor_label { return Ok(()); }
+        // Anchor above the first laid-out metric; if the panel is empty there is
+        // nothing to label, so draw nothing rather than float a label in space.
+        let Some(first) = self.config_layout.items.first() else { return Ok(()) };
+        let (x, y) = (first.x as f64, first.y as f64);
+        let text = format!("Monitor {}", self.monitor_index + 1);
+        let lay = pangocairo::functions::create_layout(cr);
+        let mut d = pangocairo::pango::FontDescription::from_string("Monospace");
+        d.set_size(config.general.metric_font_size as i32 * pangocairo::pango::SCALE);
+        lay.set_font_description(Some(&d));
+        lay.set_text(&text);
+        layout::draw_text_glow_at(cr, &lay, x, y - 28.0, self.color_rgb, &config.general.glow_passes, config)
+    }
+
     fn draw_metrics(&self, cr: &CairoContext, config: &Config, metrics: &MetricData) -> Result<()> {
+        self.draw_monitor_label(cr, config)?;
         for item in &self.config_layout.items {
             if let Some(id) = MetricId::from_str(&item.metric_id) {
                 if let Some(v) = metrics.values.get(&id) {

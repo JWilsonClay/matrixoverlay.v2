@@ -9,16 +9,21 @@ use crate::core::config::Config;
 pub fn build(vbox: &Box, config: &Config) -> (Button, Button, Button, CheckButton, Button) {
     vbox.set_border_width(10);
     
-    let btn_min = Button::with_label("Minimal");
+    let btn_min = Button::with_label("Minimal (needs Pulse Mode — not yet available)");
     let btn_med = Button::with_label("Medium");
-    let btn_ext = Button::with_label("Extreme");
+    let btn_ext = Button::with_label("Extreme (exceeds the ambience budget)");
     
     let hbox_presets = Box::new(Orientation::Horizontal, 5);
     hbox_presets.pack_start(&btn_min, true, true, 0);
     hbox_presets.pack_start(&btn_med, true, true, 0);
     hbox_presets.pack_start(&btn_ext, true, true, 0);
     
+    // [Phase 8.5] Reflect the active preset rather than leaving the user to guess.
     vbox.pack_start(&Label::new(Some("Performance Presets")), false, false, 0);
+    vbox.pack_start(
+        &Label::new(Some(&format!("Active: {}", config.cosmetics.perf_preset) as &str)),
+        false, false, 0,
+    );
     vbox.pack_start(&hbox_presets, false, false, 0);
 
     let check_logging = CheckButton::with_label("Enable Debug Logging (Auto-rotated)");

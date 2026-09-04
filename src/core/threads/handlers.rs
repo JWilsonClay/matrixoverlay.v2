@@ -109,6 +109,21 @@ pub fn handle_gui_event(
     metrics_tx: &Sender<MetricsCommand>,
 ) {
     match event {
+        // [Phase 8.1/8.3] Apply the preset to the live config, persist it
+        // through the normal atomic save, then fall through to the same reload
+        // path a manual save takes.
+        GuiEvent::ApplyPreset(name) => {
+            if crate::core::config::presets::apply(config, &name) {
+                if let Err(e) = config.save() {
+                    log::error!("[GUI] Preset '{}' could not be saved: {}", name, e);
+                } else {
+                    log::info!("[GUI] Applied preset '{}'.", name);
+                    handle_gui_event(conn, GuiEvent::Reload, config, renderers, metrics_tx);
+                }
+            } else {
+                log::info!("[GUI] Preset '{}' is not available yet.", name);
+            }
+        }
         GuiEvent::Reload => {
             if let Ok(new_cfg) = Config::load() {
                 *config = new_cfg.clone();
