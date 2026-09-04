@@ -155,7 +155,7 @@ This phase's deliverable is a **failing** test.
 - [ ] **AC3** — The 40-frame series shows **no warm-up convergence** (frame 40 within 15% of frame 1), confirming cache eviction rather than cold start.
 - [ ] **AC4** — R-06: the MRC contains no synthetic glyph loop; it calls `RainManager::draw`.
 
-- [x] **AC5 — ACCEPTED 2026-09-04** ("The overlay looks perfect"). — **Falsification checks X-1 and X-2 (plan §1.9). This AC decides whether Phase 3 opens at all.**
+- [ ] **AC5** — **Falsification checks X-1 and X-2 (plan §1.9). This AC decides whether Phase 3 opens at all.**
   - **X-1:** *only if AC0 returned CALIBRATED **and** X-LIVE did not trip (`mrc.release.mean_ms <= 25`)* — is the `--release` MRC mean **≤ 20 ms/frame**? If AC0 returned UNCALIBRATED, X-1 is not evaluated at all: fix the test first. If CALIBRATED and yes, the ~750 ms baseline was a dev-profile artifact and Phase 3 has nothing to fix that could explain 61%.
   - **X-2:** are the MRC mean and the single-size control **within 20% of each other** under `--release`? If yes, A-02 is false *even if both are slow* — the cost is glyph volume or fill rate, not font-cache eviction, and neither bucketing nor the atlas buys the campaign anything.
   - Either one landing means **halt: F1 is the wrong root cause.** Do not open Phase 3. Keep Phases 1–2 — they stand on their own — and re-center on whatever S-13a/S-13b named. Record the decision and its numbers in the receipt either way, including when F1 survives.
@@ -264,7 +264,7 @@ drawn — Phase 5's domain.
 
 ## Phase 5: Frame Governor
 
-**STATUS: TASKS COMPLETE — AC6 UNMET by 0.017 pp (M-1 3.0166% vs the 3.0% gate). `verdict: S04_UNMET_BRING_RECEIPT`. The governor works and tracks (0.995 fps at target 1, 4.934 at 5); `target_fps` defaults to 1, clamps 1..=60, and old configs still load. The miss is NOT the render term — that measured 1.943%, matching the projection within 6% — it is a ~1.07% frame-rate-independent floor (metrics collectors incl. the nvidia-smi subprocess, GTK/tray, XCB thread) that the §1.3 budget identity has no term for. AC5 pending user sign-off. Phase 3 NOT reopened.**
+**STATUS: TASKS COMPLETE — AC6 UNMET by 0.017 pp (M-1 3.0166% vs the 3.0% gate). `verdict: S04_UNMET_BRING_RECEIPT`. The governor works and tracks (0.995 fps at target 1, 4.934 at 5); `target_fps` defaults to 1, clamps 1..=60, and old configs still load. The miss is NOT the render term — that measured 1.943%, matching the projection within 6% — it is a ~1.07% frame-rate-independent floor (metrics collectors incl. the nvidia-smi subprocess, GTK/tray, XCB thread) that the §1.3 budget identity has no term for. **AC5 ACCEPTED 2026-09-04** ("The overlay looks perfect"). S-04's final status is `S04_AT_GATE` (three windows: 3.0166 / 2.9966 / 2.9966, mean 3.0033 — see the header and plan §1.6), superseding this line's `S04_UNMET_BRING_RECEIPT`, which predates the third window and the term isolation. Phase 3 NOT reopened.**
 
 ### Objective
 Fix the frame cap that fails open under load, and bring the refresh rate in line with the documented
@@ -285,7 +285,7 @@ refresh guidance: *"1Hz or 0.5Hz is sufficient. Avoid 60fps animations."* — [d
 - [ ] **AC2** — `target_fps` is honored: measured `fps` (Phase 1) tracks the configured value within ±10%.
 - [ ] **AC3** — Clamping verified at boundaries: `0` → 1, `9999` → 60.
 - [ ] **AC4** — C-02: existing config without `target_fps` loads and defaults correctly.
-- [ ] **AC5** — **R-03 / C-05 user sign-off (blocking):** rain motion at the new rate must read as smooth and non-strobing. ASD guidance is a hard constraint, not a preference.
+- [x] **AC5 — ACCEPTED 2026-09-04.** **R-03 / C-05 user sign-off (blocking):** rain motion at the new rate must read as smooth and non-strobing. ASD guidance is a hard constraint, not a preference. **Signed by the user after watching a throwaway-config run at `target_fps = 1` on both CRTCs: _"The overlay looks perfect."_** The agent did not look at the screen and did not interpret it.
 - [ ] **AC6** — **Audit — the budget identity gate (plan §1.3). Blocking.** Compute the **two-line** identity from plan §1.3 at the chosen default, with `monitors = 2`:
   ```
   cpu_pct ≈ (rain_ms + cairo_rest_ms) × fps × monitors ÷ 10     <- per-surface work
