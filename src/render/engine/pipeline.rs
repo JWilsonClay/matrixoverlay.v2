@@ -40,9 +40,20 @@ impl Renderer {
             crate::core::telemetry::phase58::record_clear(
                 self.width as u16, self.height as u16, t.elapsed().as_nanos() as u64);
         }
-        self.rain.update(dt, self.width, self.height, config);
         self.visual_elements.borrow_mut().clear();
+        // [Round 11] `rain.update` used to run OUTSIDE this gate, so every mode
+        // paid the fall physics tick whether or not anything was drawn — a Pulse
+        // leak. It is cheap today (0.0031 ms) but it is cost with no output, and
+        // Phase 7 cannot measure S-05a honestly while a non-fall mode is still
+        // advancing the fall simulation.
+        //
+        // Note the streams keep their positions while the mode is away: `update`
+        // reseeds only on a geometry or realism change, so switching back to
+        // fall resumes where it stopped rather than restarting the field. That
+        // is the intended behaviour. Phase 7 owns pulse physics, if pulse turns
+        // out to need any.
         if config.cosmetics.rain_mode == "fall" {
+            self.rain.update(dt, self.width, self.height, config);
             self.draw_rain_timed(&cr, config)?;
         }
         // [5.8 F-A] The metrics panel — six `show_layout` calls per metric per

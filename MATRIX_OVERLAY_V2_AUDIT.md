@@ -2287,3 +2287,357 @@ Stop at the Phase 8 receipt. Do not open Phase 7. Do not open Phase 9.
 ---
 
 Same file:
+
+---
+
+```yaml
+round: 11
+against: be47456
+ac5: pending_HITL
+phase_7: SHUT
+phase_9: SHUT
+phase_10: OPEN
+rain_update_gate: THIS_PASS
+```
+
+Copy from here.
+
+---
+
+# AGENT PROMPT — Round 11: Phase 10 docs + rain.update gate + AC5 protocol
+# Against: be47456   Branch: refactor/matrixoverlay.v2
+# Campaign: 20260903-matrixoverlay-render-remediation
+
+```yaml
+round: 11
+against: be47456
+s04: AT_GATE
+s04_series: [3.0166, 2.9966, 2.9966]
+s04_mean: 3.0033
+ac5: pending_HITL
+phase_7: SHUT
+phase_9: SHUT
+phase_10: OPEN
+rain_update_gate: THIS_PASS
+do_not: [pulse_impl, atlas, damage, panel_cache, install_sh, autostart, kill_overlay, forge_AC5, mutate_user_config]
+```
+
+## 0. Bindings
+
+Phase 8 is complete. AC5 is the last human gate. Write a viewing protocol.
+Do not set `ac5_user_signoff: accepted`.
+
+Phase 7 and Phase 9 stay SHUT until the user writes that field.
+
+`target_fps=2` is not free. At 1 fps, render = 2.460%. At 2 fps ≈ 4.92% render + 0.54% floor = **5.46% whole-process**, over the 3.0 gate. Cite both. Do not bump the default.
+
+User config.md5 must stay `4747e9c8a1bb239170f3a446d083a4e6`.
+
+## 1. Standing rules
+
+- Method M-1 only. Publish the series. Do not cite 2.9966 as "the" result.
+- Launch: `cargo build --release || exit 1` then `./target/release/matrix-overlay & TESTPID=$!`
+- Throwaway XDG_CONFIG_HOME for any agent-owned run.
+- C-01 175. C-02 serde default. C-06 no deploy.
+- `/nodelete` [INTENT] untouchable.
+- Standing rule: ACs assert load behavior (N events, rate), never one step.
+
+## 2. Commit 1 — gate rain.update
+
+`src/render/engine/pipeline.rs`: `rain.update` runs outside the `"fall"` gate.
+Move it behind the same `rain_mode == "fall"` check that guards `rain.draw`.
+
+- One if. No new module.
+- Comment: Pulse leak; Phase 7 will own pulse physics if any.
+- pipeline.rs is 131; stay ≤ 175.
+- Existing tests still pass.
+- Do not implement Pulse.
+
+## 3. Commit 2 — Phase 10 documentation
+
+### CLAUDE.md Rendering Pipeline
+Step 1 says clear to **transparent**. Wrong. Code + pitfalls: `Operator::Source` + `rgba(0,0,0,1.0)` opaque black (CONFIRMED 2026-05-21). Correct the prose. Do not change the clear.
+
+### CLAUDE.md module map
+Flat `presentation.rs` is stale since e948079. Real path: `src/render/engine/presentation/{mod,shm,socket}.rs`. Add `src/core/config/presets.rs`, `src/core/telemetry/`. Do not invent `glyph_cache.rs`.
+
+### CLAUDE.md Configuration
+`target_fps` default 1, clamp 1..=60. Preset table: Medium / Extreme / Minimal-deferred. S04_AT_GATE series.
+
+### pitfalls.md — Pango font-cache eviction
+CONFIRMED-BUG style:
+- Cycling N FontDescriptions through one layout evicts before reuse.
+- Lab: MRC 605 ms / 74× control (LAB_F1). Live: 9.62 ms / 1.25× (F1 not live).
+- Cost lands on first `show_layout` after size change, not on `set_font_description`.
+- `s.depth` stays continuous. Phase 3 demoted.
+
+### pitfalls.md — Mock Trap
+`test_render_optimization_bench` measured one font size through one layout while production cycled ~162 sizes. Green for months, ~90× off. Rule: production code, production-shaped inputs, or label it a control.
+
+Also record:
+- `test_stability_no_flicker` guarded `update_ms` while the tick was 33 ms.
+- `test_layout_predictability` shipped with every assert commented out.
+- `tests/window_integration.rs` asserts 1920×1080; RandR is 4096×2160 + 1920×1080 (R-11).
+- `tests/metrics_tests.rs` never compiled (`NvidiaSmiCollector::new_with_command`) — MT-3.
+- Standing rule (4th recurrence): assert behaviour under load, never a local copy of the production expression, never a property of one step.
+- F8 origin: d2f61a1 "FORCE OVERRIDE: Ensure rain is enabled for verification". Companion `realism_scale=8` was cleaned; this line survived 7 months.
+- C-02 vs GL-2 delete: a field in the user's live config.json cannot be removed from the struct without `deny_unknown_fields` rejecting the file.
+- `timer.rs` was a second dead metrics loop carrying the F4 1 ms fail-open. No callers. Deleted with `factory.rs`.
+
+### Citation
+`concept.md` §IV = 500 ms minimum update. "1Hz or 0.5Hz is sufficient" and "No flashing" live at pitfalls.md:70-72. Do not re-attribute.
+
+### DevJournal.md
+2026-09-03 → 2026-09-04: 60.7% discovered, F2 16× lie, A-01 1.3 vs live 30.2, MRC 61× vs live, governor, identity close, S04_AT_GATE 3.0033 ± 0.020, F8 origin d2f61a1, timer.rs was a second F4. Do not write "S-04 passed".
+
+## 4. AC5 protocol — write it; do not execute a verdict
+
+May start a throwaway-XDG release binary at Medium (`target_fps=1`), then leave it running. Do not mark accepted or rejected. Do not kill a user overlay. Do not touch `~/.config/matrix-overlay/config.json`.
+
+```
+cargo build --release || exit 1
+XDG_CONFIG_HOME=/tmp/mo-ac5 HOME=/tmp/mo-ac5-home \
+  ./target/release/matrix-overlay
+# Medium defaults: 1 fps fall, realism 4
+```
+
+Look ~30 s on BOTH CRTCs (HDMI-1-0 4K and eDP 1080p):
+- Slow pulse of the desktop, or slideshow / stall?
+- Any strobing (C-05 / "No flashing")?
+- Metrics panel readable?
+
+User replies with exactly one of:
+```
+ac5_user_signoff: accepted
+ac5_user_signoff: rejected_want_2fps
+ac5_user_signoff: rejected_other <reason>
+```
+
+If `rejected_want_2fps`: whole-process at 2 fps ≈ **5.46%**, over the 3.0 gate. New conversation, not a silent bump.
+
+If the user is not present, launch nothing. Leave `user_verdict: pending`.
+
+## 5. Receipt
+
+```yaml
+phase: 10
+git_sha: _
+rain_update_gated: true
+claude_md:
+  clear_corrected: _
+  presentation_path_corrected: _
+  target_fps_documented: _
+pitfalls:
+  font_cache_entry: _
+  mock_trap_entry: _
+  standing_rule_present: true
+  f8_origin_d2f61a1: _
+devjournal: _
+ac5_protocol_written: true
+ac5_user_signoff: pending
+phase_7: SHUT
+phase_9: SHUT
+s04: AT_GATE
+s04_series: [3.0166, 2.9966, 2.9966]
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
+```
+
+## 6. Definition of done
+
+- [ ] `rain.update` only runs when `rain_mode == "fall"`.
+- [ ] CLAUDE.md clear + presentation path + target_fps/presets documented.
+- [ ] pitfalls.md has font-cache, Mock Trap, standing rule, R-11/MT-3, F8 origin.
+- [ ] DevJournal records the session numbers. Does not say "S-04 passed".
+- [ ] AC5 protocol in the receipt. Field still `pending` unless the user wrote a verdict.
+- [ ] User config.md5 unchanged. C-01 honored.
+- [ ] No Pulse renderer. No atlas. No install.sh. No Phase 7/9.
+
+Stop. Wait for the user's AC5 line. Phase 9 is C-06, not a courtesy install.
+
+---
+
+Same file:
+
+---
+
+# AGENT PROMPT — Round 11: Phase 10 docs + rain.update gate + AC5 protocol
+# Against: be47456   Branch: refactor/matrixoverlay.v2
+# Campaign: 20260903-matrixoverlay-render-remediation
+# From: Grok Round 11 adjudication of PHASE_8_RECEIPT.md
+
+```yaml
+round: 11
+against: be47456
+s04: AT_GATE
+s04_series: [3.0166, 2.9966, 2.9966]
+s04_mean: 3.0033
+ac5: pending_HITL
+phase_7: SHUT
+phase_9: SHUT
+phase_10: OPEN
+rain_update_gate: THIS_PASS
+do_not: [pulse_impl, atlas, damage, panel_cache, install_sh, autostart, kill_overlay, forge_AC5, mutate_user_config]
+```
+
+## 0. Bindings
+
+Phase 8 is complete. AC5 is the last human gate. You will write a viewing protocol.
+You will not set `ac5_user_signoff: accepted`.
+
+Phase 7 (Pulse) and Phase 9 (deploy) stay SHUT until the user writes that field.
+
+`target_fps=2` is not a free option. Live terms at 1 fps:
+  rain 1.613 + present 0.310 + clear 0.369 + glow 0.168 = 2.460
+  at 2 fps ≈ 4.92% render + floor 0.54% = **5.46% whole-process**, over the 3.0 gate.
+Cite both numbers if asked. Do not bump the default.
+
+User config.md5 must stay `4747e9c8a1bb239170f3a446d083a4e6`.
+
+## 1. Standing rules
+
+- Method M-1 only. Publish the series. Do not cite 2.9966 as "the" result.
+- Launch: `cargo build --release || exit 1` then `./target/release/matrix-overlay & TESTPID=$!`
+- Throwaway XDG_CONFIG_HOME for any agent-owned run.
+- C-01 175. C-02 serde default. C-06 no deploy.
+- `/nodelete` [INTENT] untouchable.
+- Standing rule: ACs assert load behavior (N events, rate), never one step.
+
+## 2. Commit 1 — gate rain.update
+
+`src/render/engine/pipeline.rs`: `rain.update` runs outside the `"fall"` gate.
+Move the update behind the same `rain_mode == "fall"` check that guards `rain.draw`.
+
+- One if. No new module.
+- Comment: Pulse leak; Phase 7 will own pulse physics if any.
+- C-01: pipeline.rs is 131; stay ≤ 175.
+- Existing asd/governor/lib tests still pass.
+- Do not implement Pulse.
+
+## 3. Commit 2 — Phase 10 documentation
+
+Docs only, plus the comment that rides (2).
+
+### CLAUDE.md Rendering Pipeline
+- Step 1 currently says clear to **transparent**. Wrong.
+- Code + pitfalls: `Operator::Source` + `rgba(0,0,0,1.0)` opaque black
+  (CONFIRMED 2026-05-21). Correct the prose. Do not change the clear.
+
+### CLAUDE.md module map
+- Flat `presentation.rs` is stale since e948079.
+- Real path: `src/render/engine/presentation/{mod,shm,socket}.rs`.
+- Add `src/core/config/presets.rs`, `src/core/telemetry/`.
+- Do not invent `glyph_cache.rs` — Phases 3–4 never ran.
+
+### CLAUDE.md Configuration
+- `target_fps` default 1, clamp 1..=60.
+- Preset table: Medium / Extreme / Minimal-deferred.
+- S04_AT_GATE series.
+
+### pitfalls.md — Pango font-cache eviction
+CONFIRMED-BUG style, matching SHM / OverrideRedirect entries:
+- Mechanism: cycling N FontDescriptions through one layout evicts before reuse.
+- Lab: cargo-test MRC 605 ms / 74× its control (LAB_F1).
+- Live: 9.62 ms / 1.25× in-process control (F1 not live).
+- Cost lands on first `show_layout` after size change, not on `set_font_description`.
+- `s.depth` stays continuous; only font size may be quantized. Phase 3 demoted.
+
+### pitfalls.md — Mock Trap
+`test_render_optimization_bench` measured one font size through one layout
+while production cycled ~162 sizes. Green for months, ~90× off.
+Rule: production code, production-shaped inputs, or label it a control.
+
+Also record:
+- `test_stability_no_flicker` guarded `update_ms` while the tick was 33 ms.
+- `test_layout_predictability` shipped with every assert commented out.
+- `tests/window_integration.rs` maps real desktop windows and asserts
+  1920×1080; RandR here is 4096×2160 + 1920×1080 (R-11).
+- `tests/metrics_tests.rs` never compiled
+  (`NvidiaSmiCollector::new_with_command`) — MT-3.
+- Standing rule (4th recurrence): assert behaviour under load
+  (N events, achieved rate), never a local copy of the production
+  expression and never a property of one step.
+- F8 origin: d2f61a1 "FORCE OVERRIDE: Ensure rain is enabled for verification".
+  Companion `realism_scale=8` was cleaned; this line survived 7 months.
+- C-02 vs GL-2 delete: a field in the user's live config.json cannot be
+  removed from the struct without `deny_unknown_fields` rejecting the file.
+- `timer.rs` was a second dead metrics loop carrying the F4 1 ms fail-open.
+  No callers. Deleted with `factory.rs`.
+
+### Citation
+`concept.md` §IV = 500 ms minimum update. "1Hz or 0.5Hz is sufficient"
+and "No flashing" live at pitfalls.md:70-72. Do not re-attribute.
+
+### DevJournal.md
+2026-09-03 → 2026-09-04 session: 60.7% discovered, F2 16× lie,
+A-01 1.3 vs live 30.2, MRC 61× vs live, governor, identity close,
+S04_AT_GATE 3.0033 ± 0.020, F8 origin d2f61a1, GL-2 timer.rs was a second F4.
+Do not write "S-04 passed".
+
+## 4. AC5 protocol — write it; do not execute a verdict
+
+Agent may start a throwaway-XDG release binary at Medium (`target_fps=1`)
+so there is something to look at, then leave it running. Do not mark
+accepted or rejected. Do not kill a user overlay. Do not touch
+`~/.config/matrix-overlay/config.json`.
+
+```
+cargo build --release || exit 1
+XDG_CONFIG_HOME=/tmp/mo-ac5 HOME=/tmp/mo-ac5-home \
+  ./target/release/matrix-overlay
+# Medium defaults: 1 fps fall, realism 4
+```
+
+Look for ~30 s on BOTH CRTCs (HDMI-1-0 4K and eDP 1080p):
+- Does the rain read as a slow pulse of the desktop, or as a slideshow / stall?
+- Any strobing (C-05 / pitfalls "No flashing")?
+- Metrics panel readable?
+
+User replies with exactly one of:
+```
+ac5_user_signoff: accepted
+ac5_user_signoff: rejected_want_2fps
+ac5_user_signoff: rejected_other <reason>
+```
+
+If `rejected_want_2fps`: whole-process at 2 fps ≈ **5.46%**, over the 3.0 gate.
+That is a new conversation, not a silent bump.
+
+If the user is not present, launch nothing. Leave `user_verdict: pending`.
+
+## 5. Receipt
+
+```yaml
+phase: 10
+git_sha: _
+rain_update_gated: true
+claude_md:
+  clear_corrected: _
+  presentation_path_corrected: _
+  target_fps_documented: _
+pitfalls:
+  font_cache_entry: _
+  mock_trap_entry: _
+  standing_rule_present: true
+  f8_origin_d2f61a1: _
+devjournal: _
+ac5_protocol_written: true
+ac5_user_signoff: pending
+phase_7: SHUT
+phase_9: SHUT
+s04: AT_GATE
+s04_series: [3.0166, 2.9966, 2.9966]
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
+```
+
+## 6. Definition of done
+
+- [ ] `rain.update` only runs when `rain_mode == "fall"`.
+- [ ] CLAUDE.md clear + presentation path + target_fps/presets documented.
+- [ ] pitfalls.md has font-cache, Mock Trap, standing rule, R-11/MT-3, F8 origin.
+- [ ] DevJournal records the session numbers (series, live 30.2, MRC 605, F8 d2f61a1).
+- [ ] AC5 protocol in the receipt. Field still `pending` unless the user wrote a verdict.
+- [ ] User config.md5 unchanged. C-01 honored.
+- [ ] No Pulse renderer. No atlas. No install.sh. No Phase 7/9.
+
+Stop. Wait for the user's AC5 line. Phase 9 is C-06, not a courtesy install.
+```
