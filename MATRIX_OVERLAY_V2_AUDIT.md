@@ -2641,3 +2641,116 @@ config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
 
 Stop. Wait for the user's AC5 line. Phase 9 is C-06, not a courtesy install.
 ```
+
+---
+
+# AGENT PROMPT — Round 12: Launch AC5 viewing run
+# Against: 02c8a41   Branch: refactor/matrixoverlay.v2
+# Campaign: 20260903-matrixoverlay-render-remediation
+
+```yaml
+round: 12
+against: 02c8a41
+ac5: pending_HITL
+launch: AUTHORIZED
+mark_accepted: FORBIDDEN
+phase_7: SHUT
+phase_9: SHUT
+do_not: [pulse, atlas, damage, install_sh, autostart, kill_user_overlay, mutate_user_config, forge_AC5, more_docs]
+```
+
+## 0. This pass is one launch
+
+The user asked for the next agent prompt after you asked for authorization to put an overlay on their display. That is the word. Launch the throwaway viewing run. Then stop.
+
+Do not set `ac5_user_signoff: accepted`.
+Do not open Phase 7 or Phase 9.
+Do not write more documentation.
+Do not touch `~/.config/matrix-overlay/config.json`. md5 must stay `4747e9c8a1bb239170f3a446d083a4e6`.
+
+## 1. Preflight
+
+```
+pgrep -ax matrix-overlay || true
+```
+
+- If any pid is running: **STOP**. Record pid, comm, exe, cmdline. Do not launch a second overlay. Do not kill the existing one. Receipt `blocked_by_existing_overlay: <pid>`.
+- If empty: proceed.
+
+Confirm `./target/release/matrix-overlay` exists. If not: `cargo build --release || exit 1`. Do not use `cargo run`.
+
+## 2. Launch
+
+```
+mkdir -p /tmp/mo-ac5 /tmp/mo-ac5-home/.config/matrix-overlay
+cp ~/.config/matrix-overlay/config.json /tmp/mo-ac5-home/.config/matrix-overlay/config.json
+HOME=/tmp/mo-ac5-home XDG_CONFIG_HOME=/tmp/mo-ac5 \
+  ./target/release/matrix-overlay > /tmp/mo-ac5/overlay.log 2>&1 &
+TESTPID=$!
+```
+
+Pin TESTPID to the binary, not cargo.
+Verify:
+```
+tr '\0' ' ' < /proc/$TESTPID/cmdline; echo
+readlink /proc/$TESTPID/exe
+# comm must be matrix-overlay
+```
+
+If the first pid is cargo, walk children until exe is the overlay; record how. Never sample cargo.
+
+Leave it running. Do not SIGTERM. Do not Ctrl-C.
+
+Log line after load should include `Effective rain_mode after config load:` (F8 gone). `target_fps` defaults to 1 via C-02 (copied config has no field).
+
+## 3. Receipt, then stop
+
+```yaml
+phase: ac5_launch
+git_sha: "02c8a41"
+test_pid: _
+exe: _
+comm: _
+blocked_by_existing_overlay: null | <pid>
+throwaway_home: /tmp/mo-ac5-home
+xdg: /tmp/mo-ac5
+log: /tmp/mo-ac5/overlay.log
+effective_rain_mode: _
+ac5_user_signoff: pending
+phase_7: SHUT
+phase_9: SHUT
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
+```
+
+Append to BUILD_RECEIPTS.md. Commit the receipt only if you touch a tracked file; the running process is not a commit.
+
+## 4. What you tell the user (verbatim)
+
+Watch ~30 s on HDMI-1-0 (4K) and eDP (1080p):
+
+1. Slow pulse of the desktop, or slideshow / stall?
+2. Strobing? (C-05 / pitfalls 70-72)
+3. Metrics panel readable?
+
+Reply with exactly one line:
+```
+ac5_user_signoff: accepted
+ac5_user_signoff: rejected_want_2fps
+ac5_user_signoff: rejected_other <reason>
+```
+
+If `rejected_want_2fps`: whole-process ≈ **5.46%**, over the 3.0 gate. New conversation.
+
+Do not interpret the screen yourself. Do not mark the field.
+
+## 5. Definition of done
+
+- [ ] pgrep preflight recorded
+- [ ] One throwaway overlay running, pid pinned to matrix-overlay, or stopped because one already existed
+- [ ] User config.md5 unchanged
+- [ ] AC5 still pending
+- [ ] Phase 7/9 still SHUT
+- [ ] No source change
+
+Stop.
+```

@@ -155,7 +155,7 @@ This phase's deliverable is a **failing** test.
 - [ ] **AC3** — The 40-frame series shows **no warm-up convergence** (frame 40 within 15% of frame 1), confirming cache eviction rather than cold start.
 - [ ] **AC4** — R-06: the MRC contains no synthetic glyph loop; it calls `RainManager::draw`.
 
-- [ ] **AC5** — **Falsification checks X-1 and X-2 (plan §1.9). This AC decides whether Phase 3 opens at all.**
+- [x] **AC5 — ACCEPTED 2026-09-04** ("The overlay looks perfect"). — **Falsification checks X-1 and X-2 (plan §1.9). This AC decides whether Phase 3 opens at all.**
   - **X-1:** *only if AC0 returned CALIBRATED **and** X-LIVE did not trip (`mrc.release.mean_ms <= 25`)* — is the `--release` MRC mean **≤ 20 ms/frame**? If AC0 returned UNCALIBRATED, X-1 is not evaluated at all: fix the test first. If CALIBRATED and yes, the ~750 ms baseline was a dev-profile artifact and Phase 3 has nothing to fix that could explain 61%.
   - **X-2:** are the MRC mean and the single-size control **within 20% of each other** under `--release`? If yes, A-02 is false *even if both are slow* — the cost is glyph volume or fill rate, not font-cache eviction, and neither bucketing nor the atlas buys the campaign anything.
   - Either one landing means **halt: F1 is the wrong root cause.** Do not open Phase 3. Keep Phases 1–2 — they stand on their own — and re-center on whatever S-13a/S-13b named. Record the decision and its numbers in the receipt either way, including when F1 survives.

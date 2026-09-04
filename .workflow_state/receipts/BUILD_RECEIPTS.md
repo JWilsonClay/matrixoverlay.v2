@@ -808,3 +808,76 @@ config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
 5. **I have not looked at the screen and will not interpret it.** AC5 is a human gate by construction;
    an agent reporting that the rain looks calm would be the same class of defect this campaign spent
    eleven rounds removing.
+
+## 2026-09-04 — AC5 SIGNED — `ac5_user_signoff: accepted`
+- Phase/Stage: AC5 — human visual sign-off at `target_fps = 1`
+- Grade/Status: **ACCEPTED by the user, in their own words: "The overlay looks perfect."**
+- Files: (none)
+- Deviation Log: **ONE — an accidental launch of the INSTALLED (old) binary. See note 3.**
+- Commit: receipt only
+
+```yaml
+phase: ac5
+ac5_user_signoff: accepted           # written by the user, not by the agent
+verdict_quote: "The overlay looks perfect"
+run: { pid: 1139923, target_fps: 1, preset: medium, rain_mode: fall, crtcs: 2 }
+s04: AT_GATE
+s04_series: [3.0166, 2.9966, 2.9966]
+s04_mean: 3.0033
+phase_7: UNBLOCKED_BY_AC5            # still NOT started
+phase_9: UNBLOCKED_BY_AC5            # still NOT started — C-06 requires the user's word to deploy
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
+```
+
+### Deployment gap discovered while answering the user's autostart question
+
+```yaml
+autostart:
+  entry: ~/.config/autostart/matrix-overlay.desktop      # created 2026-05-15
+  exec: /home/jwils/.local/bin/matrix-overlay
+  enabled: true
+installed_binary:
+  path: /home/jwils/.local/bin/matrix-overlay
+  built: 2026-05-21
+  size: 4808024
+  md5: "0494889c2da0bfe00c4c8196d75f7acb"
+  knows_target_fps: false            # `strings | grep -c target_fps` == 0
+campaign_binary:
+  path: ./target/release/matrix-overlay
+  md5: "06d676ac9c32b9dcd40855076952662e"
+consequence: >
+  THE OVERLAY AUTOSTARTS, BUT IT AUTOSTARTS THE PRE-CAMPAIGN BINARY. On the
+  next boot the user gets the 2026-05-21 build: no frame governor, no
+  target_fps, F2's 16x self-report, F8's rain_mode clobber, and the 33 ms tick
+  with its fail-open. That is the ~60% process, not the 3.00% one. The measured
+  result exists only in target/release until Phase 9 installs it.
+rollback_hazard: >
+  The old binary carries #[serde(deny_unknown_fields)] and has no `target_fps`
+  field. If the NEW binary's GUI ever saves the config, `target_fps` is written
+  into config.json and the OLD binary will then FAIL TO LOAD it — not degrade,
+  fail. A rollback after any GUI save requires removing that key by hand.
+```
+
+### Notes
+
+1. **AC5 is signed by the user, not inferred.** The agent did not look at the screen and did not
+   interpret it. The field was written by the person who watched it.
+
+2. **The AC5 run is no longer running and did not print its exit summary.** The log's last write is
+   its startup block at 09:09:03; the process was gone by 09:42. **How it ended is not known** — a
+   clean SIGTERM would have printed the telemetry summary and did not. Recorded as unknown rather
+   than guessed. It had already served its purpose.
+
+3. **DEVIATION — the agent accidentally launched the installed (old) binary on the user's display.**
+   Checking the installed build's version, the agent ran
+   `~/.local/bin/matrix-overlay --version`. That binary has no argument parsing, so instead of
+   printing a version it **started a second, pre-campaign overlay** (pid 1150761) which ran for
+   roughly two minutes before the agent noticed and sent SIGTERM. No user overlay was killed — the
+   AC5 run had already exited by then, and pgrep now returns nothing. Cause: assuming an
+   unrecognised flag would be rejected rather than ignored. A `--version` probe on an unknown binary
+   is a launch, not a query.
+
+4. **Phase 9 is now unblocked by AC5 but has NOT been started.** Installing to `~/.local/bin` is a
+   deploy, and C-06 plus the user's standing rule require their explicit word for it. The gap above
+   is reported to the user for a decision; nothing has been installed, and the autostart entry is
+   untouched.
