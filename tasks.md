@@ -10,6 +10,16 @@
 > **Mission gate:** S-04 — the live process under **3% of one core** — is the single definition of
 > done. All other criteria are means to it.
 >
+> ### S-04 — `S04_AT_GATE` (round-10, 2026-09-04)
+>
+> Three 300 s Method M-1 windows at `target_fps = 1`: **3.0166, 2.9966, 2.9966** — mean **3.0033**,
+> spread **0.020 pp**, one of three over the 3.0 gate. **The gate numeral is unchanged. 3.0166 is not
+> rounded down and 2.9966 is not cited as "the" result.** `concept.md` §III names "< 1–3%" and 3 is the
+> top of that range; the point gate was tightened by this campaign before any live term existed. The
+> `[INTENT]` — 60.7% → ~3.00%, a 20× reduction, with every term named — **is met**. The point gate is
+> not, and it is recorded as a written exception (plan §1.6). Phase 6.1 and the panel cache were priced
+> (0.3690% / 0.1676%) and declined; Phase 6.1 does not skip `clear` in fall mode in any case.
+>
 > ### STANDING RULE — performance ACs assert behaviour under load
 >
 > **A performance acceptance criterion must assert behaviour under load — N events and the achieved

@@ -1797,3 +1797,493 @@ ac5_user_signoff: pending
 
 Stop at the 5.8 (and 5.9 if gated-in) receipt. Bring it back. Do not declare S-04 met by rounding 3.0166 down.
 ```
+
+# AGENT PROMPT — Round 10: S-04 AT_GATE, amend S-05, F8, Phase 8 Medium/Extreme
+# Campaign: 20260903-matrixoverlay-render-remediation
+# Against: 95e7bac   Branch: refactor/matrixoverlay.v2
+# From: Grok Round 10 adjudication of PHASE_5.8_RECEIPT.md
+
+```yaml
+round: 10
+against: 95e7bac
+s04: AT_GATE                  # NOT met, NOT unmet-by-rounding
+s04_series: [3.0166, 2.9966, 2.9966]
+s04_mean: 3.0033
+s04_spread_pp: 0.020
+gate_numeral: 3.0             # do not retune to 3.05
+choice: C_EXCEPTION
+phase_6_1: SEQUEL_NOT_THIS_PASS
+panel_cache: NOT_THIS_PASS
+phase_5_9: NOT_THIS_PASS
+phase_7: SHUT                 # until S-05 amendment is in the plan AND AC5
+phase_8: OPEN                 # Medium + Extreme only; Minimal blocked on Pulse
+f8: THIS_PASS                 # one-liner
+do_not: [round_3.0166_down, move_gate, damage_tracking, panel_cache, atlas, pulse_impl, deploy, forge_AC5]
+```
+
+---
+
+## 0. Rulings — bind these
+
+```yaml
+C:
+  why: >
+    60.7% → 3.00% is a 20× reduction. concept.md §III named "<1-3%", and 3 is
+    the top of that range. The campaign tightened it to a point gate before
+    any live term existed. Three 300 s windows sit on that point with 0.020 pp
+    of instrument noise. Spending Phase 6 architecture on 0.17–0.37% against
+    a 0.02 pp noise band is Context Erosion (§2.7).
+  what_to_write: >
+    S-04 status = S04_AT_GATE. Publish the three-window series and the mean.
+    Do not cite 2.9966 as "the" result. The numeral 3.0 stays. The INTENT is
+    satisfied. The point-gate is not.
+
+A_why_not_now: >
+    Damage tracking does not skip clear in fall mode: rain dirties the full
+    4K+1080 every tick, so the opaque paint still runs. Phase 6.1 is a
+    Pulse/static lever (R-04, R-12, new presentation module — shm.rs is at
+    cap). Record as sequel for Pulse, not as an S-04 closer.
+
+B_why_not_now: >
+    Panel cache ceiling is glow = 0.1676% — smaller than the 0.020 pp spread.
+    Does not get S-05 under 0.5% either (floor stays 0.5368%).
+
+S-05_amendment:
+  old: Pulse Mode M-1 < 0.5%
+  why_impossible: true_floor 0.5368 >= 0.5; Pulse drawing nothing still fails
+  new: >
+    S-05a  Pulse rain+glow render term < 0.15% of one core
+           (Pulse must be cheaper than fall's 1.78% rain+glow).
+    S-05b  Whole-process M-1 at Pulse ≤ S-04 mean + 0.3 pp
+           i.e. ≤ 3.30% given current floor. The 0.5% whole-process
+           bound is retired; it assumed a floor that does not exist.
+  phase_7: remains SHUT until this text is in the plan AND AC5 is signed.
+
+AC5: pending HITL. 1 fps rain has not been seen by the user. Do not forge.
+
+F8: delete or gate-off the unconditional
+    config.cosmetics.rain_mode = "fall".to_string();
+    after Config::load() in src/core/main.rs. One line. Blocking for
+    Phase 8 Minimal (deferred) and for any later Pulse measurement.
+    Record why the line existed if git log -S finds it; if not, say so.
+
+Phase_8_scope:
+  Medium:  target_fps=1, realism=4, glow_passes=3, rain_mode=fall
+           THIS is the S04_AT_GATE configuration. Label it that way.
+           Do not claim Medium meets "< 3%". Claim "3.00% ± 0.02 at 1 fps."
+  Extreme: target_fps=30, realism=10, glow_passes=5, rain_mode=fall
+           opt-in, exempt from S-04. Label it as exceeding the ambience budget.
+  Minimal: DEFERRED. It requires Pulse (S-05 amended, Phase 7) and F8.
+           Buttons may exist but must not write rain_mode=pulse until
+           Phase 7 exists, OR they write it and F8 no longer clobbers —
+           still no Pulse renderer, so the mode would draw nothing
+           (pipeline.rs only draws rain when rain_mode=="fall").
+           Do not ship a Minimal that blanks the screen.
+
+update_ms_2s_to_5s:
+  optional, user-ask only
+  grounds: CLAUDE.md dGPU wakeup, NOT S-04
+  nvidia-smi CPU is a child; M-1 will not move
+```
+
+Live terms — do not invent new ones.
+
+```yaml
+at_1_fps:
+  series_m1: [3.0166, 2.9966, 2.9966]
+  mean: 3.0033
+  rain_pct: 1.6132
+  present_pct: 0.3099
+  clear_pct: 0.3690
+  glow_pct: 0.1676
+  render_pct: 2.4598
+  floor_pct: 0.5368
+```
+
+---
+
+## 1. Standing rules
+
+- Method M-1 only. Publish series, not a chosen window.
+- Launch: `cargo build --release || exit 1` then `./target/release/matrix-overlay & TESTPID=$!`
+- Throwaway XDG_CONFIG_HOME for test runs. User config.md5 stays `4747e9c8a1bb239170f3a446d083a4e6`.
+- C-01 175-line cap. C-02 `#[serde(default)]` on any new field.
+- C-06 no deploy, no autostart, no kill of a user overlay.
+- `/nodelete` [INTENT] untouchable.
+- Standing rule already in pitfalls.md: ACs assert load behavior, not one step.
+- F8 is THIS pass. Ungated `rain.update` remains recorded-only.
+
+---
+
+## 2. Commit 1 — documents only
+
+`implementation-plan.md`, `tasks.md`, `docs/pitfalls.md`:
+
+```
+S-04 row:
+  Status S04_AT_GATE
+  Measurement: three 300 s M-1 windows at target_fps=1
+               3.0166, 2.9966, 2.9966  mean 3.0033  spread 0.020
+  Gate numeral 3.0 unchanged
+  Exception paragraph: INTENT (60.7 → ~3, 20×) is met; the point-gate
+  is inside instrument noise. Do not select the two low runs.
+
+S-05 row: replace the 0.5% whole-process bound with S-05a / S-05b above.
+
+§2.5:
+  Phase 6.1 damage-tracking is a Pulse/static sequel. It does not skip
+  clear in fall mode (full-surface dirt every tick). Not an S-04 closer.
+  Panel cache deferred (0.17% < noise).
+
+Phase 5 AC6: recorded UNMET-at-gate; not re-run to manufacture a pass.
+
+Phase 7 entry: S-05 amendment (this commit) AND AC5 signed. Still shut.
+
+Phase 8 entry: OPEN for Medium + Extreme. Minimal deferred.
+```
+
+Pitfalls stub: "S-04 sits at a pre-measurement point-gate; report the series."
+
+---
+
+## 3. Commit 2 — F8
+
+```
+src/core/main.rs
+  Remove:
+    config.cosmetics.rain_mode = "fall".to_string();
+  or wrap behind an explicit debug flag that defaults OFF.
+  After Config::load(), log the effective rain_mode once at info
+  (one line, startup only — not per frame).
+  AC: in-process value after load equals the JSON value.
+      Verify with a unit-level fixture or a startup log assertion
+      against a throwaway config that sets rain_mode to something
+      other than "fall".
+  git log -S 'rain_mode = "fall"' — record why it existed, or that
+  no reason was found.
+```
+
+Without this, Phase 8 writing `rain_mode` is Ghost Logic.
+
+---
+
+## 4. Commit 3 — Phase 8 Medium / Extreme (not Minimal)
+
+Existing tasks 8.1–8.7, narrowed:
+
+```
+8.1  Connect adv_w.0 / .1 / .2 to GuiEvent, same pattern as adv_w.4 → PurgeLogs.
+     Minimal handler: either absent, or writes a no-op + log
+     "Minimal requires Pulse Mode (Phase 7)". Do not blank the screen.
+
+8.2  Preset table (binding):
+
+     | Preset   | target_fps | realism | glow_passes | rain_mode | obligation          |
+     | Medium   | 1          | 4       | 3           | fall      | S04_AT_GATE (3.00%) |
+     | Extreme  | 30         | 10      | 5           | fall      | opt-in, exempt      |
+     | Minimal  | —          | —       | —           | —         | deferred to Phase 7 |
+
+     default_preset stays "medium".
+     Extreme GUI label must say it exceeds the ambience budget.
+
+8.3  Applying a preset writes the derived fields and persists via the
+     existing .tmp-then-rename path.
+
+8.4  Editing an individual field after a preset → perf_preset = "custom".
+
+8.5  GUI reflects the active preset on open.
+
+8.7  GL-2 sweep — wire or delete, no third option:
+     - general.show_monitor_label
+     - logging.build_logging_enabled
+     - src/core/timer.rs (only caller of factory::create_collectors).
+       Deleting timer.rs orphans factory.rs; decide both together.
+     Verification: grep -rn each symbol; show a read, or show it gone.
+
+Do not implement Pulse. Do not draw a Minimal path.
+```
+
+### Phase 8 ACs
+
+```
+AC1  Click Medium → config.json changes AND render is the current 1 fps fall
+     (already running). Click Extreme → config.json changes AND fps moves
+     toward 30 (use the Phase 1 fps instrument, ±10%, 30 s is enough).
+AC2  Method M-1 is NOT required for Extreme. Medium is already measured
+     (the S04_AT_GATE series). Do not spend another 3×300 s to re-prove 3.00%.
+AC3  Individual edit → perf_preset "custom".
+AC4  C-02: old config without perf_preset semantics still loads.
+AC5  grep -rn perf_preset src/ shows a READ, not only a declaration.
+```
+
+Live Extreme run: throwaway XDG, 30–60 s, confirm fps ~30, then stop. Do not leave a 30 fps overlay running on the user's desktop.
+
+---
+
+## 5. Receipt schema
+
+```yaml
+phase: 8
+git_sha: _
+s04: AT_GATE
+s04_series: [3.0166, 2.9966, 2.9966]
+s04_mean: 3.0033
+s05: AMENDED                    # S-05a / S-05b text landed
+f8:
+  line_removed: true
+  git_log_S_reason: _           # or "none found"
+  in_process_survives_restart: _
+presets:
+  medium: { writes_config: _, fps_unchanged_1: _ }
+  extreme: { writes_config: _, wallclock_fps: _, metric_fps: _ }
+  minimal: DEFERRED
+gl2:
+  show_monitor_label: wired | deleted
+  build_logging_enabled: wired | deleted
+  timer_rs: wired | deleted
+  factory_rs: kept | deleted_with_timer
+ac5_user_signoff: pending
+phase_7: SHUT
+phase_9: SHUT                   # needs AC5 + C-06
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
+```
+
+---
+
+## 6. Definition of done
+
+- [ ] S-04 written as AT_GATE with the three-window series. Gate numeral 3.0 untouched. 3.0166 not rounded down.
+- [ ] S-05a / S-05b in the plan. Old 0.5% whole-process bound retired with the reason.
+- [ ] Phase 6.1 recorded as Pulse/static sequel; not started. Panel cache not started.
+- [ ] F8 line gone or debug-gated default-off. In-process rain_mode survives load.
+- [ ] Medium and Extreme buttons write config and change behavior. Minimal does not blank the screen.
+- [ ] perf_preset is read. GL-2 each symbol wired or deleted.
+- [ ] User config.md5 unchanged.
+- [ ] C-01 honored.
+- [ ] AC5 still pending. No deploy.
+- [ ] No Phase 3/4/6/7 implementation. No atlas. No Pulse renderer.
+
+Stop at the Phase 8 receipt. Do not open Phase 7. Do not open Phase 9.
+```
+
+.v2
+# From: Grok Round 10 adjudication of PHASE_5.8_RECEIPT.md
+
+```yaml
+round: 10
+against: 95e7bac
+s04: AT_GATE
+s04_series: [3.0166, 2.9966, 2.9966]
+s04_mean: 3.0033
+s04_spread_pp: 0.020
+gate_numeral: 3.0
+choice: C_EXCEPTION
+phase_6_1: SEQUEL_NOT_THIS_PASS
+panel_cache: NOT_THIS_PASS
+phase_5_9: NOT_THIS_PASS
+phase_7: SHUT
+phase_8: OPEN
+f8: THIS_PASS
+do_not: [round_3.0166_down, move_gate, damage_tracking, panel_cache, atlas, pulse_impl, deploy, forge_AC5]
+```
+
+## 0. Rulings — bind these
+
+```yaml
+C:
+  why: >
+    60.7% → 3.00% is a 20× reduction. concept.md §III named "<1-3%", and 3 is
+    the top of that range. The campaign tightened it to a point gate before
+    any live term existed. Three 300 s windows sit on that point with 0.020 pp
+    of instrument noise. Spending Phase 6 architecture on 0.17–0.37% against
+    a 0.02 pp noise band is Context Erosion (§2.7).
+  what_to_write: >
+    S-04 status = S04_AT_GATE. Publish the three-window series and the mean.
+    Do not cite 2.9966 as "the" result. The numeral 3.0 stays. The INTENT is
+    satisfied. The point-gate is not.
+
+A_why_not_now: >
+    Damage tracking does not skip clear in fall mode: rain dirties the full
+    4K+1080 every tick, so the opaque paint still runs. Phase 6.1 is a
+    Pulse/static lever (R-04, R-12, new presentation module — shm.rs is at
+    cap). Record as sequel for Pulse, not as an S-04 closer.
+
+B_why_not_now: >
+    Panel cache ceiling is glow = 0.1676% — smaller than the 0.020 pp spread.
+    Does not get S-05 under 0.5% either (floor stays 0.5368%).
+
+S-05_amendment:
+  old: Pulse Mode M-1 < 0.5%
+  why_impossible: true_floor 0.5368 >= 0.5; Pulse drawing nothing still fails
+  new: >
+    S-05a  Pulse rain+glow render term < 0.15% of one core
+           (Pulse must be cheaper than fall's 1.78% rain+glow).
+    S-05b  Whole-process M-1 at Pulse ≤ S-04 mean + 0.3 pp
+           i.e. ≤ 3.30% given current floor. The 0.5% whole-process
+           bound is retired; it assumed a floor that does not exist.
+  phase_7: remains SHUT until this text is in the plan AND AC5 is signed.
+
+AC5: pending HITL. 1 fps rain has not been seen by the user. Do not forge.
+
+F8: delete or gate-off the unconditional
+    config.cosmetics.rain_mode = "fall".to_string();
+    after Config::load() in src/core/main.rs. One line.
+    Record why it existed if git log -S finds it; if not, say so.
+
+Phase_8_scope:
+  Medium:  target_fps=1, realism=4, glow_passes=3, rain_mode=fall
+           S04_AT_GATE config. Claim "3.00% ± 0.02 at 1 fps", not "< 3%".
+  Extreme: target_fps=30, realism=10, glow_passes=5, rain_mode=fall
+           opt-in, exempt. Label as exceeding the ambience budget.
+  Minimal: DEFERRED. Requires Pulse. Do not blank the screen.
+
+update_ms_2s_to_5s:
+  optional, user-ask only
+  grounds: CLAUDE.md dGPU wakeup, NOT S-04
+```
+
+```yaml
+at_1_fps:
+  series_m1: [3.0166, 2.9966, 2.9966]
+  mean: 3.0033
+  rain_pct: 1.6132
+  present_pct: 0.3099
+  clear_pct: 0.3690
+  glow_pct: 0.1676
+  render_pct: 2.4598
+  floor_pct: 0.5368
+```
+
+## 1. Standing rules
+
+- Method M-1 only. Publish series, not a chosen window.
+- Launch: `cargo build --release || exit 1` then `./target/release/matrix-overlay & TESTPID=$!`
+- Throwaway XDG_CONFIG_HOME. User config.md5 stays `4747e9c8a1bb239170f3a446d083a4e6`.
+- C-01 175-line cap. C-02 `#[serde(default)]` on any new field.
+- C-06 no deploy, no autostart, no kill of a user overlay.
+- `/nodelete` [INTENT] untouchable.
+- Standing rule already in pitfalls.md: ACs assert load behavior, not one step.
+- F8 is THIS pass. Ungated `rain.update` remains recorded-only.
+
+## 2. Commit 1 — documents only
+
+`implementation-plan.md`, `tasks.md`, `docs/pitfalls.md`:
+
+```
+S-04 row:
+  Status S04_AT_GATE
+  Measurement: 3.0166, 2.9966, 2.9966  mean 3.0033  spread 0.020
+  Gate numeral 3.0 unchanged
+  Exception: INTENT (60.7 → ~3, 20×) is met; the point-gate is inside
+  instrument noise. Do not select the two low runs.
+
+S-05 row: replace the 0.5% whole-process bound with S-05a / S-05b.
+
+§2.5:
+  Phase 6.1 is a Pulse/static sequel. It does not skip clear in fall mode.
+  Panel cache deferred (0.17% < noise).
+
+Phase 5 AC6: recorded UNMET-at-gate; not re-run to manufacture a pass.
+Phase 7 entry: S-05 amendment AND AC5 signed. Still shut.
+Phase 8 entry: OPEN for Medium + Extreme. Minimal deferred.
+```
+
+## 3. Commit 2 — F8
+
+```
+src/core/main.rs
+  Remove: config.cosmetics.rain_mode = "fall".to_string();
+  or wrap behind a debug flag that defaults OFF.
+  After Config::load(), log effective rain_mode once at info.
+  AC: in-process value after load equals the JSON value.
+      Throwaway config with rain_mode != "fall".
+  git log -S 'rain_mode = "fall"' — record why, or none found.
+```
+
+## 4. Commit 3 — Phase 8 Medium / Extreme (not Minimal)
+
+```
+8.1  Connect adv_w.0 / .1 / .2 to GuiEvent, same pattern as adv_w.4 → PurgeLogs.
+     Minimal handler: absent, or no-op + log "Minimal requires Pulse Mode (Phase 7)".
+     Do not blank the screen.
+
+8.2  Preset table:
+
+     | Preset   | target_fps | realism | glow_passes | rain_mode | obligation          |
+     | Medium   | 1          | 4       | 3           | fall      | S04_AT_GATE (3.00%) |
+     | Extreme  | 30         | 10      | 5           | fall      | opt-in, exempt      |
+     | Minimal  | —          | —       | —           | —         | deferred to Phase 7 |
+
+     default_preset stays "medium".
+     Extreme GUI label must say it exceeds the ambience budget.
+
+8.3  Preset writes derived fields; persist via existing .tmp-then-rename.
+8.4  Individual edit after preset → perf_preset = "custom".
+8.5  GUI reflects the active preset on open.
+8.7  GL-2 — wire or delete, no third option:
+     - general.show_monitor_label
+     - logging.build_logging_enabled
+     - src/core/timer.rs (only caller of factory::create_collectors).
+       Deleting timer.rs orphans factory.rs; decide both together.
+     grep -rn each symbol; show a read, or show it gone.
+
+Do not implement Pulse. Do not draw a Minimal path.
+```
+
+```
+AC1  Medium → config changes, still 1 fps fall.
+     Extreme → config changes, fps moves toward 30 (±10%, 30 s enough).
+AC2  No new 3×300 s M-1 for Medium. Extreme not an S-04 gate.
+AC3  Individual edit → perf_preset "custom".
+AC4  C-02: old config still loads.
+AC5  grep -rn perf_preset src/ shows a READ.
+```
+
+Live Extreme run: throwaway XDG, 30–60 s, confirm fps ~30, then stop. Do not leave a 30 fps overlay on the user's desktop.
+
+## 5. Receipt schema
+
+```yaml
+phase: 8
+git_sha: _
+s04: AT_GATE
+s04_series: [3.0166, 2.9966, 2.9966]
+s04_mean: 3.0033
+s05: AMENDED
+f8:
+  line_removed: true
+  git_log_S_reason: _
+  in_process_survives_restart: _
+presets:
+  medium: { writes_config: _, fps_unchanged_1: _ }
+  extreme: { writes_config: _, wallclock_fps: _, metric_fps: _ }
+  minimal: DEFERRED
+gl2:
+  show_monitor_label: wired | deleted
+  build_logging_enabled: wired | deleted
+  timer_rs: wired | deleted
+  factory_rs: kept | deleted_with_timer
+ac5_user_signoff: pending
+phase_7: SHUT
+phase_9: SHUT
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
+```
+
+## 6. Definition of done
+
+- [ ] S-04 written as AT_GATE with the three-window series. Gate numeral 3.0 untouched. 3.0166 not rounded down.
+- [ ] S-05a / S-05b in the plan. Old 0.5% whole-process bound retired with the reason.
+- [ ] Phase 6.1 recorded as Pulse/static sequel; not started. Panel cache not started.
+- [ ] F8 line gone or debug-gated default-off. In-process rain_mode survives load.
+- [ ] Medium and Extreme buttons write config and change behavior. Minimal does not blank the screen.
+- [ ] perf_preset is read. GL-2 each symbol wired or deleted.
+- [ ] User config.md5 unchanged.
+- [ ] C-01 honored.
+- [ ] AC5 still pending. No deploy.
+- [ ] No Phase 3/4/6/7 implementation. No atlas. No Pulse renderer.
+
+Stop at the Phase 8 receipt. Do not open Phase 7. Do not open Phase 9.
+
+---
+
+Same file:

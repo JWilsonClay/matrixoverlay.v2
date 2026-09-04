@@ -172,3 +172,28 @@ Three recurrences in one campaign, all the same shape:
 
 Each was caught by reinstating the defect, never by reading the test. Write the red-check into the
 procedure, not into good intentions.
+
+---
+
+## Pitfall: tightening a range into a point gate before you have measured anything
+
+*(Added 2026-09-04, Render Substrate Remediation campaign, round-10.)*
+
+`concept.md` §III asked for **"< 1–3%"** of one core. The remediation campaign wrote that down as a
+point gate of **3.0%** — before it knew the frame rate (inferred 1.3, actually 30.2), before it knew
+the rain draw cost (inferred ~750 ms/frame, actually 10 ms), and before it knew a frame-rate-independent
+floor existed at all (0.5368%).
+
+The finished work measures **3.0166 / 2.9966 / 2.9966** across three 300 s windows — mean **3.0033**,
+spread **0.020 pp**. The gate sits inside the instrument's own noise. One run is over it, two are
+under, and which you quote decides whether the campaign "passed."
+
+Two failure modes open up here and both are wrong:
+
+- **Select the two low runs** and declare victory. That is the number choosing the conclusion.
+- **Spend architecture to buy 0.17–0.37%** against a 0.020 pp band. That is Context Erosion — rigor
+  decaying into motion, because a gate is easier to chase than to re-examine.
+
+The correct move is to **publish the series, state the verdict as "at gate", and write the exception
+against the original requirement** — which in this case was a *range* whose top the result meets. A
+point gate derived from a range is an assumption, and assumptions get audited like everything else.
