@@ -884,9 +884,9 @@ rollback_hazard: >
 
 ## 2026-09-04 — /execute-build — Phase 9: Deploy (user-authorized)
 - Phase/Stage: Phase 9 — install the campaign binary and verify it on the deployed path
-- Grade/Status: **DEPLOYED AND VERIFIED. M-1 on the deployed binary: 2.8933%. ONE STEP OUTSTANDING — the root-owned binary needs the user's `sudo`.**
+- Grade/Status: **DEPLOYED AND VERIFIED. M-1 on the deployed binary: 2.8933%. COMPLETE — the user ran the `sudo rm`; exactly one matrix-overlay binary now exists on the system.**
 - Files: (none in-repo) | INSTALLED: ~/.local/bin/matrix-overlay
-- Deviation Log: **ONE — `/usr/local/bin/matrix-overlay` NOT removed; passwordless sudo is unavailable and the agent will not collect a password. Command handed to the user.**
+- Deviation Log: **ONE, now CLOSED — the agent could not remove `/usr/local/bin/matrix-overlay` (no passwordless sudo; the agent will not collect or proxy a password). The command was handed to the user, who ran it. Verified.**
 - Commit: receipt only
 
 ```yaml
@@ -901,7 +901,8 @@ binaries_before:
   - { path: /home/jwils/.local/bin/matrix-overlay, built: 2026-05-21, md5: "0494889c2da0bfe00c4c8196d75f7acb" }
 binaries_after:
   - { path: /home/jwils/.local/bin/matrix-overlay, md5: "c9208479c6738c66924c279f0ab9097b", status: NEW }
-  - { path: /usr/local/bin/matrix-overlay, status: STILL_PRESENT, blocked_on: user_sudo }
+  # /usr/local/bin/matrix-overlay — REMOVED by the user 2026-09-04 via
+  # `sudo rm -v /usr/local/bin/matrix-overlay`. Verified absent by the agent.
 removal_method: overwrite_in_place        # cp over the May binary; no backup, per the user's choice
 sudo_removal_command: "sudo rm -v /usr/local/bin/matrix-overlay"
 sudo_blocked_reason: >
@@ -965,3 +966,31 @@ config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
 5. **`~/.config/autostart/x11-monitor-overlay.desktop` remains untouched** — it points at
    `/usr/local/bin/x11-monitor-overlay`, which does not exist. A dead entry for a different program;
    outside the scope of "old matrix overlay binaries" and reported to the user rather than acted on.
+
+### Phase 9 closure — final system state (verified 2026-09-04)
+
+```yaml
+matrix_overlay_binaries_on_system: 1
+  path: /home/jwils/.local/bin/matrix-overlay
+  md5: "c9208479c6738c66924c279f0ab9097b"
+removed:
+  - { path: /usr/local/bin/matrix-overlay, built: 2026-02-27, by: user_sudo, verified_absent: true }
+  - { path: /home/jwils/.local/bin/matrix-overlay, built: 2026-05-21, by: overwrite_in_place }
+path_resolution: /home/jwils/.local/bin/matrix-overlay      # matches the installed md5
+autostart_exec:  /home/jwils/.local/bin/matrix-overlay      # matches the installed md5
+running: { pid: 1161862, exe: /home/jwils/.local/bin/matrix-overlay }
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"          # unchanged the entire campaign
+untouched_and_reported: ~/.config/autostart/x11-monitor-overlay.desktop  # points at a nonexistent binary; different program
+phase_9: COMPLETE
+phase_7: SHUT
+s04: AT_GATE
+s04_series: [3.0166, 2.9966, 2.9966, 2.8933]
+s04_mean: 2.9758
+```
+
+**Campaign close.** `[INTENT]` — *"Make the Matrix Overlay stop eating 60% of a CPU core, and make it
+honest about what it costs"* — is met on the deployed binary: **60.7% → 2.8933%** on the path the
+system actually boots, with every term in it named and measured. S-04's point gate stays
+`AT_GATE` under the round-10 written exception; the four-window series is published rather than
+reduced to its best member. Phase 7 (Pulse Mode) is the only phase left unopened, and S-05a/S-05b are
+the amended criteria it must meet.
