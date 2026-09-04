@@ -73,6 +73,45 @@ pub fn summary() -> String {
         }
     }
 
+    out.push_str(&phase58_summary());
+    out
+}
+
+/// [Phase 5.8] The four residual terms, printed once at exit.
+///
+/// Deliberately does NOT compute percentages: those need the M-1 window length,
+/// which only the external harness knows. Printing a percentage here would
+/// invite it to be quoted as an M-1 figure, and M-1 is the campaign's only
+/// sanctioned live-CPU measurement.
+fn phase58_summary() -> String {
+    use super::phase58::{clear_snapshot, collector_snapshot, glow_snapshot};
+    let (clear, glow) = (clear_snapshot(), glow_snapshot());
+    let (tick_ns, ticks, nv_ns, nv_calls) = collector_snapshot();
+    if clear.is_empty() && glow.is_empty() && ticks == 0 { return String::new(); }
+
+    let mut out = String::from(
+        "\n=== Phase 5.8 — residual isolation (means, ms) ===\n\
+         geometry           frames      clear       glow\n",
+    );
+    let mut keys: Vec<&String> = clear.keys().chain(glow.keys()).collect();
+    keys.sort(); keys.dedup();
+    let (mut clear_sum, mut glow_sum) = (0.0, 0.0);
+    for k in keys {
+        let c = clear.get(k).map(|(ns, n)| mean_ms(*ns, *n)).unwrap_or(0.0);
+        let g = glow.get(k).map(|(ns, n)| mean_ms(*ns, *n)).unwrap_or(0.0);
+        let frames = clear.get(k).map(|(_, n)| *n).unwrap_or(0);
+        clear_sum += c; glow_sum += g;
+        out.push_str(&format!("{k:<15} {frames:>10} {c:>10.4} {g:>10.4}\n"));
+    }
+    out.push_str(&format!(
+        "summed across CRTCs: clear={clear_sum:.4} ms/frame  glow={glow_sum:.4} ms/frame\n"
+    ));
+    out.push_str(&format!(
+        "collectors: cycles={ticks}  tick_mean={:.4} ms  total_tick={:.3} s\n\
+         nvidia-smi: calls={nv_calls}  mean={:.4} ms  total={:.3} s\n",
+        mean_ms(tick_ns, ticks), tick_ns as f64 / 1e9,
+        mean_ms(nv_ns, nv_calls), nv_ns as f64 / 1e9,
+    ));
     out
 }
 

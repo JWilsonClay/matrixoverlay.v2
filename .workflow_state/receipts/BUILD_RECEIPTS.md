@@ -446,3 +446,125 @@ line_caps: { threads/mod: 160, config/types: 161, config/mod: 120, gui/general: 
 8. **`tests/metrics_tests.rs` still does not compile** (`NvidiaSmiCollector::new_with_command` does not
    exist) — the pre-existing MT-3 finding, excluded from the phase gate as Phase 2 AC3 specifies. Not
    introduced here.
+
+## 2026-09-04 — /execute-build — Phase 5.8: Isolate the residual (round-9)
+- Phase/Stage: Phase 5.8 — residual isolation
+- Grade/Status: **COMPLETE — four terms named, remainder measured. `decision: PANEL_CACHE`. 5.9 NOT authorized (no evidence collectors dominate M-1).**
+- Files: src/core/telemetry/phase58.rs | src/core/telemetry/mod.rs, src/core/telemetry/report.rs, src/render/engine/pipeline.rs, src/metrics/manager.rs, src/metrics/collectors/nvidia.rs, implementation-plan.md, tasks.md, docs/pitfalls.md
+- Deviation Log: NONE
+- Commit: see 6b
+
+```yaml
+phase: 5.8
+git_sha_base: "4b6cb16"
+target_fps: 1
+update_ms: 2000                  # unchanged — 5.9 not authorized, see finding 3
+m1:
+  clk_tck: 100
+  windows_300s:                  # THREE windows, not one — see finding 1
+    - { tag: phase5, t0_ticks: 1225, t1_ticks: 2130, window_s: 300.0072, cpu_pct: 3.0166 }
+    - { tag: 5.8-a,  t0_ticks: 1243, t1_ticks: 2142, window_s: 300.0064, cpu_pct: 2.9966 }
+    - { tag: 5.8-b,  t0_ticks: 1252, t1_ticks: 2151, window_s: 300.0064, cpu_pct: 2.9966 }
+  mean_pct: 3.0033
+  spread_pp: 0.0200
+  over_gate: "1 of 3"
+wallclock_fps: 0.995             # 601 presents/CRTC over ~604 s
+render:                          # per tick, summed across both CRTCs
+  rain_4k_ms: 10.6972
+  rain_1080_ms: 5.5156
+  present_sum_ms: 3.1148
+  pct: 1.9231
+clear:                           # F-B — re-measured at 1 fps on the LIVE SHM surfaces
+  hdmi_4k_ms: 3.1733
+  edp_1080_ms: 0.5355
+  sum_ms: 3.7088
+  pct: 0.3690
+  note: "S-13a's ~3.29 ms was 30 fps on a standalone surface; this supersedes it for the identity"
+glow:                            # F-A — never measured before this phase
+  hdmi_4k_ms: 0.7420
+  edp_1080_ms: 0.9429
+  sum_ms: 1.6848
+  pct: 0.1676
+  note: "the 1080p panel costs MORE than the 4K one — glow is per-metric, not per-pixel"
+collectors:                      # F-C
+  cycles: 300                    # update_ms=2000 over ~604 s
+  tick_mean_ms: 117.9433
+  tick_total_wall_s: 35.383
+  nvidia_smi_calls: 300
+  nvidia_smi_mean_ms: 28.0314
+  nvidia_smi_total_wall_s: 8.409
+  pct_of_m1: "NOT SEPARABLE — see finding 3. This is WALL time, most of it blocking."
+render_subtotal_ms_per_tick: 24.7212
+render_subtotal_pct: 2.4598      # rain + present + clear + glow
+remainder_pct: 0.5368            # M-1 2.9966 - 2.4598. Collectors + GTK/tray + XCB.
+decision: PANEL_CACHE            # clear+glow = 0.5367 >= 0.5 per round-9 §3.4
+s05_floor_ok: false              # remainder 0.5368 >= 0.5 -> Phase 7 stays shut, S-05 needs amending
+ac5_user_signoff: pending
+phase_3: BLOCKED_AND_DEMOTED
+gate_moved: false                # 3.0% untouched; 3.0166 not rounded down
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
+line_caps: { telemetry/phase58: 77, telemetry/mod: 158, telemetry/report: 142, pipeline: 131, manager: 92, nvidia: 47 }
+```
+
+### The identity, as named quantities
+
+```
+rain     16.2128 ms/tick -> 1.6132 %
+present   3.1148 ms/tick -> 0.3099 %
+clear     3.7088 ms/tick -> 0.3690 %
+glow      1.6848 ms/tick -> 0.1676 %
+                            -------
+render subtotal             2.4598 %
+remainder (collectors + GTK + XCB)  0.5368 %
+                            -------
+                            2.9966 %  = M-1, exactly
+```
+
+### Findings — Phase 5.8
+
+1. **S-04 is inside the run-to-run noise band, and that is the real headline.** Three 300 s M-1
+   windows at `target_fps=1`: **3.0166, 2.9966, 2.9966** — mean **3.0033**, spread **0.020 pp**. The
+   gate is 3.0. **One of three runs is over it.** The third run was taken specifically because two
+   runs straddling a gate cannot decide it. S-04 is therefore neither met nor missed at any useful
+   confidence: it is *at* the gate. Declaring it met on the two low readings would be rounding
+   3.0166 down by selection, which round-9 explicitly forbids. `decision` is set from the term
+   analysis, not from the straddle.
+
+2. **The 1.073% "floor" was half render.** Round-9's ruling was correct: `clear` (0.3690%) and glow
+   (0.1676%) are rate-dependent and belong in `cairo_rest_ms`. Together they are **0.5367%** — almost
+   exactly the 0.536 pp by which the old subtraction overstated the floor. **The true floor is
+   0.5368%, not 1.073%.**
+
+3. **F-C cannot be converted into an M-1 percentage, and reporting one would be wrong.** The collector
+   cycle costs **117.94 ms of WALL time**, of which **28.03 ms is `nvidia-smi`**. That subprocess's
+   CPU is charged to a **child process** and never appears in this process's `utime + stime`, which is
+   what M-1 reads (fields 14+15, not `cutime`/`cstime`). Most of the remaining wall time is the
+   collector thread *blocked*, not running. So the honest statement is: **collectors contribute to the
+   0.5368% remainder along with GTK/tray and XCB, and this pass cannot say by how much.**
+   Consequently **5.9 is NOT authorized** — round 9 requires evidence that collectors dominate, and
+   this is not that evidence. Raising `update_ms` would cut dGPU wakeups and system-wide load (a real
+   benefit `CLAUDE.md` already argues for) while possibly barely moving M-1.
+
+4. **The glow is not where it was expected, and it is small.** 1.6848 ms/tick total — **0.1676%**, the
+   smallest of the four terms. It had been named as unmeasured in three consecutive receipts and
+   treated as the leading suspect for the residual. It is not. Note also that the **1080p panel costs
+   more glow than the 4K one** (0.9429 vs 0.7420 ms): glow scales with metric count and text length,
+   not pixels, and the eDP screen carries more metrics.
+
+5. **`clear` is the larger of the two, and a panel cache will not touch it.** At 3.7088 ms/tick
+   (0.3690%) it is more than twice the glow. It is an opaque full-surface `paint` of 4096×2160 plus
+   1920×1080 and cannot be cached away — only damage tracking (the old Phase 6.1) removes it. So
+   `decision: PANEL_CACHE` is set by the §3.4 table, but its realistic ceiling is the **0.1676%** of
+   glow, not the 0.5367% of `clear + glow`. Recorded rather than left to be discovered later.
+
+6. **`s05_floor_ok: false`.** The remainder is 0.5368% and S-05 demands `< 0.5%` for Pulse Mode. Even
+   a Pulse Mode that draws *nothing* cannot meet S-05 against this floor. **Phase 7 must not open**
+   until either the floor drops below 0.5% or S-05 is explicitly amended — exactly the condition
+   round 9 anticipated.
+
+7. **S-13a's `clear` figure is superseded.** It recorded ~3.29 ms at 30 fps on a standalone
+   `ImageSurface`; the live SHM figure at 1 fps is **3.7088 ms**. Close, but measured on the right
+   surface at the right rate, and the identity should use this one.
+
+8. **Recorded, not fixed (unchanged):** F8 (`main.rs` clobbers `rain_mode`), `rain.update` outside the
+   `"fall"` gate.

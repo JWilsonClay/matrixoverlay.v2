@@ -30,13 +30,30 @@ impl Renderer {
         *self.frames.borrow_mut() += 1;
         self.presenter.pre_draw(conn)?;
         let cr = CairoContext::new(self.presenter.surface())?;
+        // [5.8 F-B] `clear` was last measured at 30 fps on a standalone surface
+        // (S-13a, ~3.29 ms). This times it on the live SHM surface at the
+        // configured rate, which is the figure the identity actually needs.
+        let (dbg, _, _) = Self::debug_flags();
+        let t_clear = if dbg { Some(std::time::Instant::now()) } else { None };
         self.clear(&cr)?;
+        if let Some(t) = t_clear {
+            crate::core::telemetry::phase58::record_clear(
+                self.width as u16, self.height as u16, t.elapsed().as_nanos() as u64);
+        }
         self.rain.update(dt, self.width, self.height, config);
         self.visual_elements.borrow_mut().clear();
         if config.cosmetics.rain_mode == "fall" {
             self.draw_rain_timed(&cr, config)?;
         }
+        // [5.8 F-A] The metrics panel — six `show_layout` calls per metric per
+        // frame through `draw_text_glow_at`. Named as unmeasured in three
+        // consecutive receipts; measured here.
+        let t_glow = if dbg { Some(std::time::Instant::now()) } else { None };
         self.draw_metrics(&cr, config, metrics)?;
+        if let Some(t) = t_glow {
+            crate::core::telemetry::phase58::record_glow(
+                self.width as u16, self.height as u16, t.elapsed().as_nanos() as u64);
+        }
         drop(cr);
         self.presenter.present(conn, window)?;
         Ok(())

@@ -118,7 +118,7 @@ Every criterion below is a command or a reading, not a judgment.
 | **S-02** | Glyph atlas removes Pango from hot path | New assertion, post-Phase 4: zero `show_layout` calls on the rain path (atlas blit only). Observed ms recorded in the receipt, **not** a moved threshold on the S-01 test | Hot-path Pango shaping count = **0** |
 | **S-03** | `overlay_cpu` matches an external CPU reading | **Method M-1** (below) vs the on-screen `overlay_cpu` value | Within **±1 percentage point** |
 | **S-04** | Live process meets concept.md §III | **Method M-1** on the deployed binary, 300 s window, after a known restart | **< 3% of one core** |
-| **S-05** | Pulse Mode meets concept.md §II.1 | **Method M-1**, with `rain_mode: "pulse"` confirmed live in-process (F8) | **< 0.5% of one core** |
+| **S-05** ⚠️ **CONDITIONAL ON THE TRUE FLOOR (round-9)** | Pulse Mode meets concept.md §II.1 | **Method M-1**, with `rain_mode: "pulse"` confirmed live in-process (F8) | **< 0.5% of one core** | **Phase 7 must not open until Phase 5.8 reports.** S-05 is `< 0.5%`; if the true floor (collectors + GTK + XCB) is itself ≥ 0.5%, Pulse Mode cannot meet S-05 no matter how little it draws, and S-05 must be explicitly amended rather than quietly missed. |
 | **S-06** | Frame rate is directly readable | On-screen `fps` metric vs an independent 10 s wall-clock count of `Presenter::present` calls | Reported fps within **±10%** of the wall-clock count |
 | **S-07** | Frame cap holds under load | Governor test: inject a 200 ms frame, observe pacing | Tick never re-queues faster than the configured interval |
 | **S-08** ⚠️ **VACATED (round-8)** | Mock Trap disarmed | `cargo test --release --test performance_tests` | ~~The replacement MRC **fails before** Phase 3 and **passes after**~~ — **red-before/green-after is vacated because Phase 3 is not opening.** The Mock Trap *was* disarmed (`test_render_optimization_bench` deleted, R-06 rule written, control labeled) and that half stands. The transition proof presumed a Phase 3 that the in-process 1.25× ratio has demoted. |
@@ -188,6 +188,33 @@ cpu_pct ≈ (rain_ms + cairo_rest_ms) × fps × monitors ÷ 10
         + (present_ms_hdmi + present_ms_edp) × fps ÷ 10
         + floor_pct                    <- frame-rate INDEPENDENT; measured 1.07% on this host
 ```
+
+**Round-9 result (measured 2026-09-04, Phase 5.8).** The four terms, per tick at `target_fps = 1`,
+summed across both CRTCs:
+
+| term | ms/tick | % of one core |
+|---|---|---|
+| rain | 16.2128 | 1.6132 |
+| present | 3.1148 | 0.3099 |
+| `clear` | 3.7088 | 0.3690 |
+| glow | 1.6848 | 0.1676 |
+| **render subtotal** | **24.7212** | **2.4598** |
+| **remainder** — collectors + GTK/tray + XCB | — | **0.5368** |
+| **total** | — | **2.9966 = M-1, exactly** |
+
+**The true `floor_pct` is 0.5368%, not 1.073%** — half the old subtraction was `clear` and glow, which
+are rate-dependent and belong in `cairo_rest_ms` as stated below. `clear`'s live SHM figure supersedes
+S-13a's 3.29 ms (that was 30 fps on a standalone surface). Glow is the *smallest* term at 0.1676%,
+not the leading suspect it had been treated as for three receipts.
+
+**Round-9 correction — 1.07% is a subtraction, not a floor.** Two rate-*dependent* terms are still
+hiding inside it: `clear()` (~3.29 ms measured at 30 fps on one surface × 2 — **never re-measured at
+1 fps**) and the metrics glow ([drawing.rs:27-39](src/render/layout/drawing.rs#L27-L39), six
+`show_layout` calls per metric per frame, **never measured at all**). Both belong in
+`cairo_rest_ms`, not in the floor. Only what remains after they are named — collectors on
+`update_ms`, the GTK/tray thread, the XCB event thread — is the true `floor_pct`. **Stop spending
+against a subtraction:** Phase 5.8 measures all four terms so the identity reads as named quantities
+plus a remainder.
 
 **Lowering `target_fps` cannot reduce `floor_pct`.** Any projection that omits it promises a number
 the process cannot reach, and at a 3% gate a 1% floor is a third of the entire budget. It must be
@@ -624,6 +651,7 @@ Named per the global failure vocabulary. Each has a specific countermeasure in t
 
 | Pattern | Instance | Guard |
 |---|---|---|
+| **One-step assertion** *(named round-9; three recurrences)* | A performance AC asserts a property of a **single step** instead of behaviour under load, and therefore passes a fail-open implementation. Phase 1: `format_overlay_cpu` tested against a local copy of the expression. Phase 2: `Config::default()` substituted for production-shaped inputs. Phase 5: `next_deadline` returning `now + 1ms` **passed** S-07, because a 1 ms tick also lands after the frame and within one period | **A performance AC must assert behaviour under load — N events and the achieved rate — never a property of one step.** Verify by reinstating the defect and watching the test go red before accepting green |
 | **Mock Trap** | `test_render_optimization_bench` passed green for months while measuring the one font-size case production never takes | Phase 2 MRC must go **red before** Phase 3 and green after (S-08); R-06 forbids synthetic loops |
 | **Ghost Logic** | `perf_preset` field + three GUI buttons wired to nothing; Pulse Mode described in `concept.md`, absent from `pipeline.rs` | Phases 7–8 resolve by implementation; §2.5 permits resolution by deletion — never by leaving them |
 | **Hallucinated Success** | Declaring the CPU fixed while measuring with a gauge that reads 16× low | Phase 1 precedes all fixes; S-03 cross-checks against **Method M-1** (§1.3) — never `ps -o pcpu`, which is the lifetime average that would report the *old* cost of a fixed-but-unrestarted process |

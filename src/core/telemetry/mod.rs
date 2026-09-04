@@ -16,6 +16,7 @@
 //! path being measured is a new cost centre inside the measurement, and would
 //! inflate the very number S-13b exists to establish.
 
+pub mod phase58;
 pub mod report;
 pub use self::report::summary;
 
@@ -69,7 +70,7 @@ impl Default for Lap {
     fn default() -> Self { Self::new() }
 }
 
-fn geom_key(w: u16, h: u16) -> String { format!("{}x{}", w, h) }
+pub(crate) fn geom_key(w: u16, h: u16) -> String { format!("{}x{}", w, h) }
 
 /// Record a `pre_draw` round-trip for one CRTC. Never logs.
 pub fn record_pre_draw(w: u16, h: u16, ns: u64) {

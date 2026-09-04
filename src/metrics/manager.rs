@@ -48,8 +48,14 @@ pub fn spawn_metrics_thread(config: &Config) -> (Arc<Mutex<SharedMetrics>>, Arc<
                 }
             }
 
+            // [5.8 F-C] Time the whole collector cycle, with the `nvidia-smi`
+            // share broken out. Accumulated internally; printed once at exit.
+            let t_tick = Instant::now();
             let mut frame = std::collections::HashMap::new();
             for c in &mut colls { frame.extend(c.collect()); }
+            let tick_ns = t_tick.elapsed().as_nanos() as u64;
+            let (nv_ns, nv_calls) = crate::core::telemetry::phase58::take_nvidia();
+            crate::core::telemetry::phase58::record_collector_tick(tick_ns, nv_ns, nv_calls);
 
             // [1.8] Debug readback for S-03/S-06 verification. Entirely inert unless
             // MATRIX_OVERLAY_DEBUG_METRICS is set in the environment — no config

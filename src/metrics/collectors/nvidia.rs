@@ -18,10 +18,16 @@ impl MetricCollector for NvidiaSmiCollector {
         let mut map = HashMap::new();
 
         // [HARDENING] Secure binary execution with timeout
+        // [5.8 F-C] Timed: `CLAUDE.md` warns that polling the dGPU in PRIME
+        // on-demand wakes it, which makes this subprocess the leading suspect
+        // for the frame-rate-independent floor. Unconditional and cheap — one
+        // `Instant` around a call that already spawns a process.
+        let t_nv = Instant::now();
         let output = Command::new("nvidia-smi")
             .args(&["--query-gpu=temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"])
             .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null()).output().ok();
+        crate::core::telemetry::phase58::add_nvidia_call(t_nv.elapsed().as_nanos() as u64);
 
         if let Some(out) = output {
             let s = String::from_utf8_lossy(&out.stdout);

@@ -146,3 +146,29 @@ inputs can still be measuring a different program, because *the process is an in
 acting on a benchmark, reconcile it against the same function timed inside the running binary. The
 campaign's MRC satisfied every anti-Mock-Trap rule that was written down and still disagreed with the
 substrate by 59× per glyph. **The in-process measurement is the one that decides.**
+
+---
+
+## Pitfall: a performance test that checks one step will pass a broken implementation
+
+*(Added 2026-09-04, Render Substrate Remediation campaign, round-9 standing rule.)*
+
+**A performance assertion must test behaviour under load — N events and the achieved rate — never a
+property of a single step.** Verify it by reinstating the defect and watching the test go red before
+you accept it green.
+
+Three recurrences in one campaign, all the same shape:
+
+1. **Phase 1.** A test for the `overlay_cpu` normalization defined a *local copy* of the production
+   expression and asserted against that. It would have passed with the 16× bug reinstated.
+2. **Phase 2.** The replacement MRC called production `RainManager::draw` — satisfying the written
+   anti-Mock-Trap rule — but primed it from `Config::default()`, whose `rain_speed` is 10× the live
+   value. Production-shaped was asserted, not verified.
+3. **Phase 5.** The S-07 governor test asserted that the next tick lands *after* the slow frame and
+   *within one period* of it. Both are true of a `next_deadline` that returns `now + 1ms` — which is
+   exactly the fail-open behaviour the test existed to forbid. It passed. Rewritten to drive 20
+   overrunning frames and assert the achieved rate, it fails the broken version with
+   `20 frames took 4.8s, under the 19s the rate allows`.
+
+Each was caught by reinstating the defect, never by reading the test. Write the red-check into the
+procedure, not into good intentions.

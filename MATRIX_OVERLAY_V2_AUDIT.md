@@ -1468,3 +1468,332 @@ verdict: S04_MET | S04_UNMET_BRING_RECEIPT
 
 Stop after the Phase 5 receipt. If AC6 M-1 ≥ 3% at 1 fps, stop and bring the receipt — do not open Phase 3 to explain it.
 ```
+
+---
+
+```yaml
+round: 9
+against: 4b6cb16
+s04: UNMET
+accept_3.0166: false
+reopen_phase_3: false
+phase_5_8: OPEN
+phase_5_9: GATED_ON_COLLECTORS
+phase_7: BLOCKED_UNTIL_FLOOR
+prompt: /home/workdir/artifacts/ROUND9_AGENT_PROMPT.md
+```
+
+```yaml
+ruling: >
+  0.017 pp is located, not mysterious. 1.943% is rain+present.
+  The 1.073% residual still contains per-tick work (clear, glow).
+  That is not a pure floor. Stop spending against a subtraction.
+  target_fps is already 1 and cannot cut either half.
+  ~5 ticks in 300 s is one nvidia-smi spawn. Measure, then decide.
+next: isolate glow, clear@1fps, collectors, remainder
+then: raise update_ms IFF collectors dominate
+s05: conditional — if true floor ≥ 0.5%, Phase 7 cannot meet <0.5%
+ac5: pending HITL
+standing_rule: assert load behavior (N events, achieved rate), never one step
+```
+
+Do not declare S-04 met by rounding 3.0166 down. Agent executes the file.
+
+# AGENT PROMPT — Round 9: Isolate the 1.07% residual
+# Campaign: 20260903-matrixoverlay-render-remediation
+# Against: 4b6cb16   Branch: refactor/matrixoverlay.v2
+# From: Grok Round 9 adjudication of PHASE_5_RECEIPT.md
+# Scope: plan/tasks patch + Phase 5.8 floor measurement. Then a gated 5.9 IFF collectors dominate.
+
+```yaml
+round: 9
+against: 4b6cb16
+s04: UNMET                    # 3.0166 vs 3.0 — do not reclassify as pass
+phase_3: BLOCKED_AND_DEMOTED  # 1.25 < 3.00; rain is not why S-04 misses
+phase_5_governor: COMPLETE
+phase_5_8: OPEN               # isolate residual
+phase_5_9: GATED              # raise update_ms only if 5.8 says collectors dominate
+phase_6: NOT_THIS_PASS
+phase_7: NOT_THIS_PASS        # S-05 is now conditional on the true floor
+do_not: [accept_3.0166, move_the_gate, reopen_phase_3, atlas, pulse, presets, deploy, forge_AC5]
+```
+
+---
+
+## 0. Rulings — bind these
+
+```yaml
+miss:
+  m1_at_1: 3.0166
+  gate: 3.0
+  delta_pp: 0.0166
+  delta_ticks_300s: ~5              # CLK_TCK=100; one nvidia-smi spawn can do this
+  identity_closes: "1.943 + 1.073 = 3.016 vs M-1 3.0166"
+
+the_1_073_is_not_a_pure_floor:
+  accounted_render_ms: 19.4348      # rain_4k + rain_1080 + present ONLY
+  still_inside_the_residual:
+    clear_x2_ms: ~3.29              # S-13a, measured at 30 fps; per-tick = RATE-DEPENDENT
+    glow: unmeasured                # drawing.rs:27-39, 6× show_layout per metric per frame; RATE-DEPENDENT
+  true_floor_candidates:
+    - metrics collectors on update_ms (nvidia-smi subprocess)
+    - GTK / tray thread
+    - XCB event thread
+  consequence: >
+    Stop spending against a subtraction. Split residual into
+    (clear + glow) which belong in the render identity, and
+    (collectors + GTK + XCB) which is the true floor.
+    target_fps is already 1 — the governor cannot cut either half further.
+
+routes_rejected:
+  accept_now: false                 # gate stays 3.0 until the residual is named
+  reopen_phase_3: false
+  lower_target_fps: false           # clamp is 1; pitfalls.md:72 floor
+  full_phase_6: false               # damage/mutex architecture is not the next lever
+
+routes_authorized:
+  5.8: measure the residual directly
+  5.9: raise update_ms IFF 5.8 shows collectors dominate
+  then: re-run M-1 at target_fps=1
+  if_still_over: written exception against concept.md §III, then AC5 + later phases
+
+s05_conditional: >
+  Pulse Mode S-05 is <0.5%. If the true floor stays ≥0.5%, Phase 7 cannot
+  meet S-05 without cutting collectors. Do not open Phase 7 until 5.8 numbers
+  exist and either the floor is under 0.5% or S-05 is explicitly amended.
+
+standing_rule: >
+  A performance AC must assert behaviour under load (N events, achieved rate),
+  never a property of one step. Recurrences: Phase 1 format_overlay_cpu local
+  copy; Phase 2 Config::default() substitution; Phase 5 next_deadline now+1ms
+  passing S-07. Write this into tasks.md AND docs/pitfalls.md.
+```
+
+Live terms — do not mix MRC 605 ms into any number.
+
+```yaml
+live_at_1_fps:
+  wallclock_fps: 0.995
+  metric_fps: 1.009
+  m1_cpu_pct: 3.0166
+  rain_4k_ms: 10.5461
+  rain_1080_ms: 5.6787
+  present_sum_ms: 3.2100
+  render_subtotal_ms: 19.4348
+  render_pct: 1.943
+  residual_pct: 1.073
+```
+
+---
+
+## 1. Standing rules (unchanged)
+
+- Method M-1 only. Two `/proc/<pid>/stat` samples, fields 14+15, after known restart.
+- Warm-up: t0 after streams have filled (the 12-min run flattened at t≈120 s; Phase 5 used 300 s warm-up — keep that).
+- Launch as TWO statements:
+    cargo build --release || exit 1
+    ./target/release/matrix-overlay & TESTPID=$!
+  Never `cargo run`. Never `cmd && bin &`.
+- Throwaway `$HOME` / `XDG_CONFIG_HOME` for test runs. User config.md5 must stay `4747e9c8a1bb239170f3a446d083a4e6`.
+- C-01: 175-line hard cap.
+- C-02: no new config fields without `#[serde(default)]`. `update_ms` already exists — 5.9 only changes the default and/or the live test-run value.
+- C-06: no deploy, no autostart, no kill of a user overlay.
+- `/nodelete` [INTENT] untouchable.
+- Amend, do not delete, S-nn / F-nn / R-nn.
+- F8, ungated `rain.update`: record only.
+
+---
+
+## 2. First commit — documents + standing rule
+
+`implementation-plan.md` + `tasks.md` + `docs/pitfalls.md`:
+
+```
+§1.3 budget identity — three lines, not two:
+
+  cpu_pct ≈ (rain_ms + cairo_rest_ms) × fps × monitors / 10     # per-surface
+          + (present_hdmi + present_edp) × fps / 10            # per-CRTC
+          + floor_pct                                          # NEW: collectors + GTK + XCB
+
+  cairo_rest_ms must eventually include clear + glow.
+  floor_pct is frame-rate-independent. target_fps cannot cut it.
+
+§1.9 / Phase 5 status:
+  AC6 UNMET by 0.017 pp. Residual located as a subtraction, not as rain.
+  Phase 3 stays demoted.
+
+New standing rule (pitfalls.md + tasks.md header):
+  "A performance AC must assert behaviour under load (N events, achieved
+   rate), never a property of one step. A one-step assertion will pass a
+   fail-open implementation. Three recurrences in this campaign."
+
+S-05 footnote:
+  Conditional on true floor. Do not open Phase 7 until 5.8 reports.
+```
+
+Do not move the 3.0% number.
+
+---
+
+## 3. Phase 5.8 — isolate the residual (this pass's work)
+
+Instrument. Do not "fix" glow, do not cache the metrics panel, do not raise `update_ms` until the numbers exist.
+
+### 3.1 Four terms, one 300 s window after warm-up, target_fps=1
+
+```text
+F-A  GLOW — wall time of draw_metrics / the 6× show_layout path
+     (drawing.rs:27-39), both CRTCs, accumulate internally, print once
+     at exit next to the S-13b summary. Same constraint as S-13b:
+     no per-frame log line on the measured path.
+     Env-gate: MATRIX_OVERLAY_DEBUG_METRICS already exists — extend it.
+
+F-B  CLEAR — wall time of Renderer::clear() both CRTCs at 1 fps.
+     S-13a has ~3.29 ms at 30 fps on one surface ×2. Re-measure at 1 fps
+     on the live SHM surfaces. Do not reuse the 30 fps figure as if it
+     were the 1 fps figure.
+
+F-C  COLLECTORS — over the SAME M-1 window:
+       - overlay utime+stime (already M-1)
+       - count of nvidia-smi processes spawned / wait time
+         (wrap the spawn site or read /proc/<pid>/task/*/children + comm)
+       - if cheap: time the collector tick in metrics/manager.rs the
+         same way rain.draw is timed (accumulate, print once)
+     CLAUDE.md already warns nvidia-smi wakes the sleeping dGPU.
+
+F-D  REMAINDER = M-1_pct - render_pct - glow_pct - clear_pct - collector_pct
+     This is GTK/tray + XCB event thread + anything still unnamed.
+```
+
+Identity after 5.8 must be four named terms plus remainder, not a subtraction called "floor."
+
+### 3.2 Implementation constraints
+
+- Accumulate internally, one summary at exit. No per-frame log.
+- Prefer extending `src/core/telemetry/` (already at 157 / 99 lines — C-01: if growth would exceed 175, new file under telemetry/).
+- `drawing.rs` / `pipeline.rs` stay under 175.
+- Debug-gated. Production path unchanged when env is unset.
+- OnceLock for env flags already exists (`Renderer::debug_flags`) — use it. Do not call `env::var_os` per frame.
+
+### 3.3 Live run
+
+```
+cargo build --release || exit 1
+XDG_CONFIG_HOME=<throwaway> MATRIX_OVERLAY_DEBUG_METRICS=1 \
+  ./target/release/matrix-overlay & TESTPID=$!
+# confirm exe, comm, target_fps=1 (default)
+# warm-up ≥ 120 s (prefer 300 s to match Phase 5)
+# M-1 window 300 s
+# print telemetry summary on SIGTERM
+```
+
+Record raw ticks, not only percentages.
+
+### 3.4 Decision table — evaluated AFTER the receipt exists
+
+```yaml
+if glow_pct + clear_pct >= 0.5:
+  next: surgical metrics-panel cache (old Phase 6.2/6.3 only)
+        NOT full Phase 6, NOT Phase 3
+        NOT this commit — bring the receipt
+
+if collector_pct >= 0.4 OR nvidia-smi wait dominates F-C:
+  next: Phase 5.9 in the SAME campaign pass is authorized
+        change default update_ms 2000 → 5000
+        #[serde(default)] already on the field; existing configs keep 2000
+        unless you also write a one-line note that the campaign test run
+        sets 5000 in the throwaway config
+        then re-run M-1 at target_fps=1
+
+if remainder_pct >= 0.5 AND collectors are small:
+  next: ACCEPT 3.02% with a written exception against concept.md §III
+        "structural floor = GTK + XCB + collectors; 20× down from 60.7%"
+        then AC5 HITL and stop
+
+if after 5.9 M-1 < 3.0:
+  s04: MET
+  then AC5 HITL
+
+if after 5.9 M-1 still >= 3.0:
+  written exception, do not chase further this campaign
+```
+
+Do not implement 5.9 until F-A..F-D numbers are in the receipt. If they are in and collectors dominate, 5.9 may ride a second commit in this pass.
+
+---
+
+## 4. Phase 5.9 — gated, collectors only
+
+```
+defaults.rs / the existing update_ms default: 2000 → 5000.
+Rationale: 2 s polling of nvidia-smi wakes a sleeping dGPU and is
+invisible-quality at 5 s for a temperature readout.
+Do not change the render path.
+Do not change target_fps.
+Re-run the 5.8 live protocol at update_ms=5000, target_fps=1.
+```
+
+If you do not have F-C evidence that collectors dominate, do not do 5.9.
+
+---
+
+## 5. Receipt schema
+
+```yaml
+phase: 5.8
+git_sha: _
+target_fps: 1
+update_ms: 2000                  # 5000 if 5.9 ran
+m1:
+  t0_ticks: _
+  t1_ticks: _
+  clk_tck: _
+  window_s: 300
+  cpu_pct: _
+render:
+  rain_4k_ms: _
+  rain_1080_ms: _
+  present_sum_ms: _
+  pct: _
+clear:
+  hdmi_ms: _
+  edp_ms: _
+  sum_ms: _
+  pct: _                         # sum_ms × fps / 10
+glow:
+  hdmi_ms: _
+  edp_ms: _
+  sum_ms: _
+  pct: _
+collectors:
+  nvidia_smi_spawns: _
+  nvidia_smi_wait_s: _
+  collector_tick_ms_mean: _
+  pct: _                         # best available: wait_s/window_s*100 or timed tick
+remainder_pct: _                 # m1 - render - clear - glow - collectors
+decision: 5.9_UPDATE_MS | PANEL_CACHE | ACCEPT_3_02 | S04_MET
+s05_floor_ok: _                  # true iff (remainder + collectors) < 0.5
+ac5_user_signoff: pending
+```
+
+---
+
+## 6. Definition of done
+
+- [ ] Identity in the plan has a `floor_pct` term. 3.0% gate not moved.
+- [ ] Standing rule written in tasks.md and pitfalls.md.
+- [ ] S-05 marked conditional on true floor.
+- [ ] F-A glow timed at 1 fps, both CRTCs, one exit summary.
+- [ ] F-B clear timed at 1 fps, both CRTCs, live SHM surfaces.
+- [ ] F-C collector/nvidia-smi counted or timed over the same M-1 window.
+- [ ] F-D remainder is a number, not a name.
+- [ ] Decision field set from the table in §3.4.
+- [ ] 5.9 only if that decision is `5.9_UPDATE_MS`.
+- [ ] User config.md5 unchanged.
+- [ ] C-01 honored.
+- [ ] AC5 still `pending`. Not forged.
+- [ ] No Phase 3/4/6/7 source. No atlas. No Pulse. No deploy.
+- [ ] No 605 ms figure used as an input.
+
+Stop at the 5.8 (and 5.9 if gated-in) receipt. Bring it back. Do not declare S-04 met by rounding 3.0166 down.
+```

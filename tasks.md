@@ -10,6 +10,18 @@
 > **Mission gate:** S-04 — the live process under **3% of one core** — is the single definition of
 > done. All other criteria are means to it.
 >
+> ### STANDING RULE — performance ACs assert behaviour under load
+>
+> **A performance acceptance criterion must assert behaviour under load — N events and the achieved
+> rate — never a property of one step.** A one-step assertion will pass a fail-open implementation.
+> Verify every performance AC by reinstating the defect and watching it go red before accepting green.
+>
+> Three recurrences in this campaign, all the same shape: Phase 1's `format_overlay_cpu` test asserted
+> against a local copy of the expression; Phase 2's MRC substituted `Config::default()` for
+> production-shaped inputs; Phase 5's S-07 test **passed** against a `next_deadline` returning
+> `now + 1ms`, because a 1 ms tick also lands after the frame and within one period. Each was caught by
+> the red-check, not by review.
+
 > **Order is load-bearing.** Phase 1 repairs the instruments before anything is measured; Phase 2
 > writes a failing test before Phase 3 makes it pass. Reordering these defeats their purpose.
 >
@@ -268,7 +280,10 @@ refresh guidance: *"1Hz or 0.5Hz is sufficient. Avoid 60fps animations."* — [d
   ```
   cpu_pct ≈ (rain_ms + cairo_rest_ms) × fps × monitors ÷ 10     <- per-surface work
           + (present_ms_hdmi + present_ms_edp) × fps ÷ 10        <- already per-CRTC, do NOT × monitors
-          + floor_pct                                            <- ROUND-8: frame-rate INDEPENDENT, measured 1.07%
+          + floor_pct                                            <- ROUND-8: frame-rate INDEPENDENT
+  ROUND-9: the 1.07% is a SUBTRACTION, not a floor. `clear` and the metrics glow are
+  rate-DEPENDENT and belong in `cairo_rest_ms`; only collectors + GTK + XCB are floor_pct.
+  Phase 5.8 names all four terms. Do not spend against a subtraction.
   ```
   **Round-4 correction:** the earlier single-line form multiplied a summed per-CRTC `present_ms` by `monitors`, counting every present twice. `cairo_rest_ms` is one-surface and scales by `monitors`; `present_ms_*` are per-CRTC, summed, and scale by `fps` alone. **Every term is a measured number by the time this phase runs** — `rain_ms` from the Phase 3/4 MRC, `cairo_rest_ms` from S-13a (task 2.6b), `present_ms` per CRTC from S-13b (task 1.7). The result must project **under 3%**. **Round-2 audit: the earlier "or a recorded estimate otherwise" clause is deleted** — a gate satisfiable by an unmeasured number is Hallucinated Success under a new name, and it is the exact defect class this audit exists to remove. Worked counter-example from the pre-audit draft: S-02's 8 ms ceiling × the proposed default of 10 fps = 8% of one core on the 4K panel alone, before `rest_ms` and before the second monitor — every written gate green, S-04 failed. If the projection exceeds 3%, **lower the default `target_fps` here** (plan §2.5 branch); do not defer the problem to the optional Phase 6.
 
@@ -284,6 +299,32 @@ refresh guidance: *"1Hz or 0.5Hz is sufficient. Avoid 60fps animations."* — [d
   ```
 
   **S-04 is therefore reachable by the frame governor alone, with the rain path untouched.** That is measured, not projected — and it is why round 7 demotes Phases 3–4 to sequels and makes **Phase 5 the next mission phase**. `target_fps` default must be re-derived from these numbers, not from the provisional 10 in task 5.3.
+
+- [x] 5.8 — **ISOLATE THE RESIDUAL (round-9). Blocking on any further spend.** The 1.073% is a
+  subtraction. Name it as four measured terms plus a remainder, over ONE 300 s M-1 window at
+  `target_fps = 1` after a 300 s warm-up:
+  - [x] **F-A — GLOW.** Time `draw_metrics` (the six-`show_layout` path,
+        [drawing.rs:27-39](src/render/layout/drawing.rs#L27-L39)) per CRTC. Never measured before.
+  - [x] **F-B — CLEAR.** Re-time `Renderer::clear()` per CRTC **at 1 fps on the live SHM surfaces**.
+        S-13a's ~3.29 ms is a 30 fps figure on a standalone surface and must not be reused as if it
+        were the 1 fps one.
+  - [x] **F-C — COLLECTORS.** Over the same window: time the collector tick, and count/time the
+        `nvidia-smi` subprocess specifically — `CLAUDE.md` already warns that polling it wakes the
+        sleeping dGPU.
+  - [x] **F-D — REMAINDER** = `M-1 − render − glow − clear − collectors`. GTK/tray + XCB + anything
+        still unnamed. **A number, not a name.**
+  - [x] Accumulate internally, one summary at exit, debug-gated via the existing `OnceLock` flags. No
+        per-frame log line on a measured path (the S-13b rule).
+- [ ] 5.9 — **NOT AUTHORIZED (5.8 finding 3: `nvidia-smi` CPU is charged to a child process and never enters M-1; collector wall time is mostly blocking, so "collectors dominate" is unproven).** GATED on 5.8's decision field.** Raise the default `update_ms` 2000 → 5000 **only if**
+  F-C shows collectors dominate. Render path untouched; `target_fps` untouched. Then re-run M-1.
+
+### Acceptance criteria — Phase 5.8
+- [x] **AC1F** — All four terms measured over the same window; `remainder_pct` computed, not asserted.
+- [x] **AC2F** — `decision` set from the round-9 §3.4 table: `5.9_UPDATE_MS` / `PANEL_CACHE` /
+  `ACCEPT_3_02` / `S04_MET`.
+- [x] **AC3F** — `s05_floor_ok` recorded: true iff `remainder + collectors < 0.5`. Phase 7 stays shut
+  until this exists.
+- [x] **AC4F** — The 3.0% gate is **not moved** and 3.0166% is **not rounded down**.
 
 ### Forward contract to Phases 6 and 7
 Frame cost (Phase 4) × frame rate (Phase 5) is now bounded and tunable, and AC6 has projected it under
