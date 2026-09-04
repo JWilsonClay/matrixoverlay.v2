@@ -284,3 +284,81 @@ This entry anchors the pivot from Phase 0 (Consolidation) to Phase 5 (Verificati
 - **Output**: `VALIDATION_RECEIPT.md`.
 
 ---
+
+## 2026-09-03 → 2026-09-04 — Render Substrate Remediation Campaign
+
+**Intent (`/nodelete`, unchanged all campaign):** *Make the Matrix Overlay stop eating 60% of a CPU
+core, and make it honest about what it costs.*
+
+**Result: 60.7% → 3.0033% of one core — a 20× reduction — with every term in that 3.00% named and
+measured.** S-04's point gate of 3.0% is **not** declared passed; see `S04_AT_GATE` below.
+
+### What the instruments were lying about
+
+- **F2 — a 16× under-report.** `overlay_cpu` divided `sysinfo`'s process CPU by the core count, so
+  the overlay displayed **3.79%** while Method M-1 measured **59.54%**. The overlay was wrong about
+  its own cost by more than an order of magnitude, in a metric it drew on screen. Fixed and verified
+  at **−0.84 pp** against M-1, where the old code would have shown **−40.23 pp**.
+- **A-01 — the frame rate was inferred, not measured, and the inference was off by 23×.** The plan
+  reasoned from a ~750 ms frame cost to ~1.3 fps. The live loop ran at **30.2 fps**, flat across 12
+  minutes with no decay. Every frame-budget number derived from 750 ms was wrong by ~60×.
+- **The Mock Trap.** `test_render_optimization_bench` had guarded the render path for months while
+  measuring one font size through one layout — a path production never takes. ~90× off. Deleted.
+
+### The measurement that reversed the campaign
+
+The replacement MRC satisfied every anti-Mock-Trap rule that had been written down — production
+`RainManager::draw`, production geometry, primed streams — and still disagreed with the running
+process by **61×** (605 ms vs 9.62 ms). Glyph counts matched within 6%, so it was not volume, not the
+clip guard, not priming. **Font-size churn costs the test process 74× its control and the overlay
+process 1.25×.** F1 is real in the lab and absent in production. Phases 3–4 (bucketing, glyph atlas)
+were **demoted** rather than built: they would have attacked a cost the live process does not pay.
+
+### What actually fixed it
+
+The frame governor. The 33 ms tick had a fail-open — a slow frame slept 1 ms and re-queued, so the
+loop ran fastest exactly when it was already too slow. Replaced with a monotonic deadline and
+`target_fps`, default **1**. Missed ticks are skipped, never queued.
+
+### The identity, closed
+
+At `target_fps = 1`, per tick across both CRTCs: rain 16.2128 ms · present 3.1148 · clear 3.7088 ·
+glow 1.6848 → render **2.4598%**; plus a frame-rate-**independent** floor of **0.5368%** (metrics
+collectors, GTK/tray, XCB). **2.4598 + 0.5368 = 2.9966 = M-1, exactly.**
+
+The glow had been named as the leading suspect in three consecutive receipts. Measured, it is the
+**smallest** term. `clear` is 2.2× larger — and the 1080p panel costs *more* glow than the 4K one,
+because glow scales with metric count, not pixels.
+
+### `S04_AT_GATE`
+
+Three 300 s M-1 windows: **3.0166, 2.9966, 2.9966** — mean **3.0033**, spread **0.020 pp**, one of
+three over the 3.0 gate. **This is not written down as "S-04 passed."** `concept.md` §III asks for
+"< 1–3%" and the result sits on the top of that range, inside the instrument's own noise. The
+`[INTENT]` is met; the point gate — which this campaign tightened from a range before a single live
+term existed — is recorded as a written exception. The two remaining levers were priced (panel cache
+0.1676%, damage tracking 0.3690%) and declined; damage tracking cannot skip `clear` while rain
+dirties both full surfaces every tick.
+
+### Two things that had been sitting in the tree
+
+- **F8** — `main.rs` overwrote `rain_mode` with `"fall"` after every config load, making all other
+  modes unreachable. Origin: `d2f61a1` (2026-02-28), commented *"FORCE OVERRIDE: Ensure rain is
+  enabled for verification."* A debugging line that survived **seven months**. Its companion from the
+  same commit was cleaned up; this one was not.
+- **`timer.rs`** — a second, dead copy of the metrics loop carrying the *same* F4 fail-open, with no
+  callers. `factory.rs` existed only to serve it. Both deleted. Had the F4 hunt started there, it
+  would have looked like the fix site and fixing it would have changed nothing.
+
+### The rule this campaign paid for four times
+
+**A performance AC asserts behaviour under load — N events and the achieved rate — never a property
+of one step, and never against a local copy of the production expression.** Phase 1 asserted against a
+local copy. Phase 2 substituted `Config::default()`. Phase 5's governor test **passed** against a
+deliberately fail-open implementation. Phase 8's preset script re-derived the preset table. Each was
+caught by reinstating the defect; none by reading the test.
+
+### Open
+
+**AC5 — a human has not yet looked at 1 fps rain.** No measurement can decide whether it reads as
+calm or as broken. Phases 7 (Pulse Mode) and 9 (deploy) stay shut behind it.

@@ -40,6 +40,31 @@ Auto-created with defaults on first run. Saved atomically (write to `.tmp` then 
 
 `Config` uses `#[serde(deny_unknown_fields)]` on all structs. **Adding a new config field requires `#[serde(default)]`** or existing configs will fail to parse.
 
+### Render rate and performance presets
+
+`general.target_fps` — **default 1**, clamped to `1..=60` on read via `General::fps()`. The render
+tick is a monotonic deadline, not a sleep accumulator: missed ticks are skipped, never queued as
+catch-up frames.
+
+| Preset | `target_fps` | `realism` | glow passes | `rain_mode` | |
+|---|---|---|---|---|---|
+| **Medium** *(default)* | 1 | 4 | 3 | fall | the measured configuration |
+| **Extreme** | 30 | 10 | 5 | fall | opt-in; **exceeds the ambience budget**, exempt from S-04 |
+| **Minimal** | — | — | — | — | **deferred** — needs Pulse Mode, which is not implemented |
+
+Editing any of those fields individually demotes `cosmetics.perf_preset` to `"custom"`.
+
+### Measured cost (2026-09-04, `target_fps = 1`)
+
+Three 300 s Method M-1 windows: **3.0166%, 2.9966%, 2.9966%** of one core — mean **3.0033%**, spread
+**0.020 pp**. Status **`S04_AT_GATE`**: `concept.md` §III asks for "< 1–3%" and the result sits on the
+top of that range, inside the instrument's own noise. Down from **60.7%**.
+
+Per tick, both CRTCs: rain 16.2128 ms · present 3.1148 · clear 3.7088 · glow 1.6848 → render
+**2.4598%**, plus a frame-rate-**independent** floor of **0.5368%** (metrics collectors, GTK/tray,
+XCB). Lowering `target_fps` cannot reduce the floor. Raising it to 2 would put the whole process at
+roughly **5.46%** — over the gate.
+
 Available metric IDs for `screens[].metrics`: `cpu_usage`, `ram_usage`, `ram_used`, `ram_total`, `load_avg`, `uptime`, `network_details`, `disk_usage`, `cpu_temp`, `fan_speed`, `gpu_temp`, `gpu_util`, `weather_temp`, `weather_condition`, `day_of_week`, `code_delta`, `overlay_cpu`, `location_data`, or any custom string (mapped to `MetricId::Custom`).
 
 ## Architecture
@@ -69,7 +94,10 @@ src/
   core/
     main.rs             Orchestrates full startup sequence (8 numbered steps)
     config/             Config load/save/validate; types in types.rs, defaults in defaults.rs,
-                        path-hardened I/O in storage.rs
+                        path-hardened I/O in storage.rs, performance presets in presets.rs
+    telemetry/          Frame/present/rain counters (mod.rs), the exit summary
+                        (report.rs), and the Phase 5.8 residual instruments
+                        (phase58.rs). Accumulate internally; print once at exit
     window/             XCB window creation (one per monitor via RandR), EWMH atoms, XShape
     threads/            Thread spawn helpers + handlers.rs (handle_xcb_event, draw_frame, etc.)
     layout.rs           Computes Layout structs (positions/sizes) for each monitor
@@ -94,7 +122,9 @@ src/
     engine/
       renderer.rs       Renderer struct (Cairo ImageSurface + Pango font + RainManager)
       pipeline.rs       Full frame draw pipeline
-      presentation.rs   Copies ImageSurface to XCB window
+      presentation/     Copies ImageSurface to XCB window — mod.rs, shm.rs
+                        (MIT-SHM zero-copy path), socket.rs (fallback).
+                        Split from a flat presentation.rs in e948079
     layout/
       components.rs     Individual metric widget rendering
       drawing.rs        Cairo primitives (glow passes, backgrounds)
@@ -113,10 +143,10 @@ src/
 ### Rendering Pipeline
 
 Each tick: `draw_frame()` → per-renderer pipeline:
-1. Clear Cairo `ImageSurface` to transparent
+1. Clear the Cairo `ImageSurface` to **opaque black** — `Operator::Source` + `rgba(0, 0, 0, 1.0)` + `paint()`. **Not transparent** (this line said "transparent" until 2026-09-04; the code has always been opaque, confirmed 2026-05-21 and re-confirmed by `Renderer::clear` in [pipeline.rs](src/render/engine/pipeline.rs)). Costs 3.7088 ms/tick across both CRTCs — the second-largest render term
 2. Draw Matrix rain physics (`RainManager`)
 3. Draw metrics panel (glow passes at offsets with low alpha, then full-alpha text)
-4. Copy `ImageSurface` to XCB window via `presentation.rs`
+4. Copy `ImageSurface` to XCB window via `presentation/` (`shm.rs` when MIT-SHM is available, `socket.rs` otherwise)
 
 The glow effect is multi-pass: draw text at `(x±n, y±n)` with low alpha, then once at full alpha.
 

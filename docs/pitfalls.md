@@ -197,3 +197,101 @@ Two failure modes open up here and both are wrong:
 The correct move is to **publish the series, state the verdict as "at gate", and write the exception
 against the original requirement** — which in this case was a *range* whose top the result meets. A
 point gate derived from a range is an assumption, and assumptions get audited like everything else.
+
+---
+
+## CONFIRMED BUG: Pango font-cache eviction under size churn — *in a test process*
+
+*(Added 2026-09-04. Lab-confirmed, live-refuted. Read both halves.)*
+
+**The mechanism.** Cycling N distinct `FontDescription` **sizes** through a single `pango::Layout`,
+every frame, evicts each scaled font before it is reused. `RainManager::draw` does exactly this: one
+`desc.set_size(size * s.depth * SCALE)` per stream, ~162 distinct sizes per frame at 4096×2160 with
+`realism = 4`, because `s.depth` is a continuous `f64` in `0.5..1.2`.
+
+**The cost lands on the first `show_layout` after the size change, not on `set_font_description`.**
+Timing the setter shows nothing; the rasterization is where the miss is paid.
+
+**Two measurements that disagree, and both are true:**
+
+| | cost | vs its own single-size control |
+|---|---|---|
+| `cargo test --release` (`LAB_F1`) | 605 ms/frame, 438.66 µs/glyph | **74×** |
+| the overlay process (in-process) | 9.62 ms/frame, 7.42 µs/glyph | **1.25×** |
+
+**The lab reproduces F1. The live process does not.** Glyph volume is identical (1380.8 vs 1297.0
+surviving `show_layout` calls, within 6%), so it is not the clip guard, not `rain_speed`, not warm-up,
+and not cross-test pollution. Cairo font options are byte-identical on both sides. `gtk::init()` in
+the test recovers ~18% and no more. The leading remaining mechanism is the GTK / `PangoCairoFontMap` /
+Xft font-map state the overlay holds versus the bare font map a test binary gets.
+
+**Consequence:** the planned fix (bucket `s.depth` into N discrete sizes, then a glyph atlas) was
+**demoted**. It would attack a cost the live process does not pay. `s.depth` stays continuous. The
+re-entry criterion, if anyone wants to reopen it, is `live_rain_draw / live_single_size_control ≥ 3`,
+both measured **in-process** — it is 1.25.
+
+---
+
+## CONFIRMED BUG: the Mock Trap that guarded this code for months
+
+*(Added 2026-09-04.)*
+
+`tests/performance_tests.rs::test_render_optimization_bench` asserted `< 500 ms` for 50,000 glyphs
+rendered through **one** `pango::Layout` at **one** font size, and commented itself as proof that
+"with caching, we can render 50k glyphs in milliseconds." Production cycled ~162 sizes per frame. The
+test passed continuously while the code it claimed to cover ran roughly **90× slower**. Deleted.
+
+**The rule:** a performance assertion calls production code with production-shaped inputs, or it is
+labeled a **control** and may never be cited as validation.
+
+Four more instruments in the same tree were found broken in the same audit:
+
+- `test_stability_no_flicker` asserted `general.update_ms >= 500` — the *metrics collector* period —
+  while the render tick was hard-coded 33 ms. C-05 was green against a clock production never used.
+- `test_layout_predictability` shipped with **every assertion commented out**. It could not fail.
+- `tests/window_integration.rs` asserts 1920×1080 at (0,0) beneath a comment claiming the geometry is
+  hardcoded. It is not — RandR yields 4096×2160 + 1920×1080 on this host (R-11).
+- `tests/metrics_tests.rs` **has never compiled** — it calls
+  `NvidiaSmiCollector::new_with_command`, which does not exist (MT-3).
+
+### The standing rule, and its four recurrences
+
+**A performance AC asserts behaviour under load — N events and the achieved rate — never a property
+of one step, and never against a local copy of the production expression.** Verify by reinstating the
+defect and watching the test go red.
+
+1. **Phase 1** — the `overlay_cpu` test defined a *local copy* of the production normalization and
+   asserted against that. It would have passed with the 16× bug reinstated.
+2. **Phase 2** — the replacement MRC called production `RainManager::draw` but primed it from
+   `Config::default()`, whose `rain_speed` is 10× the live value.
+3. **Phase 5** — the S-07 governor test asserted the next tick lands after the slow frame and within
+   one period. Both hold for a `next_deadline` returning `now + 1ms` — the exact fail-open it forbade.
+   It passed.
+4. **Phase 8** — the preset verification script re-derived the preset table in Python and asserted
+   against the copy. Caught before it ran.
+
+Every one was caught by reinstating the defect. None was caught by reading the test.
+
+---
+
+## Two more traps this codebase set
+
+*(Added 2026-09-04.)*
+
+**A config field in a user's live `config.json` cannot simply be deleted from the struct.** Every
+config struct carries `#[serde(deny_unknown_fields)]`. Removing a field the user's file still contains
+makes that file **fail to load** — not degrade, fail. Two Ghost Logic flags (`show_monitor_label`,
+`build_logging_enabled`) were therefore *wired* rather than deleted: "wire or delete" had only one
+safe branch. Deleting a config field is a migration, not a deletion.
+
+**`src/core/timer.rs` was a second, dead copy of the metrics loop — carrying the same bug.** It held
+the identical `else { thread::sleep(Duration::from_millis(1)); }` fail-open that the tick thread had
+(F4), and it had **no callers**; `src/metrics/factory.rs` existed solely to serve it. Both deleted. Had
+the F4 hunt started here, this file would have looked like the fix site and fixing it would have
+changed nothing — an argument for measuring the running process before reading the source.
+
+**F8 — a debugging override that outlived its debugging session by seven months.**
+`src/core/main.rs` overwrote `config.cosmetics.rain_mode` with `"fall"` immediately after
+`Config::load()`, making every other mode unreachable. It entered in `d2f61a1` (2026-02-28) commented
+*"FORCE OVERRIDE: Ensure rain is enabled for verification"*. Its companion from the same commit and
+comment (`realism_scale = 8`) was cleaned up; this one was not.
