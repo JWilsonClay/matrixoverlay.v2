@@ -881,3 +881,87 @@ rollback_hazard: >
    deploy, and C-06 plus the user's standing rule require their explicit word for it. The gap above
    is reported to the user for a decision; nothing has been installed, and the autostart entry is
    untouched.
+
+## 2026-09-04 — /execute-build — Phase 9: Deploy (user-authorized)
+- Phase/Stage: Phase 9 — install the campaign binary and verify it on the deployed path
+- Grade/Status: **DEPLOYED AND VERIFIED. M-1 on the deployed binary: 2.8933%. ONE STEP OUTSTANDING — the root-owned binary needs the user's `sudo`.**
+- Files: (none in-repo) | INSTALLED: ~/.local/bin/matrix-overlay
+- Deviation Log: **ONE — `/usr/local/bin/matrix-overlay` NOT removed; passwordless sudo is unavailable and the agent will not collect a password. Command handed to the user.**
+- Commit: receipt only
+
+```yaml
+phase: 9
+git_sha: "f03dfe8"
+authorization: >
+  User: "can we completely remove all old matrix overlay binarys and reinstall
+  the new one?" Agent halted and asked; user chose sudo-remove-both and
+  delete-now-no-backup.
+binaries_before:
+  - { path: /usr/local/bin/matrix-overlay,     built: 2026-02-27, md5: "f78b758b2bc6916ee2b20a5afbead2ee", owner: "root:root" }
+  - { path: /home/jwils/.local/bin/matrix-overlay, built: 2026-05-21, md5: "0494889c2da0bfe00c4c8196d75f7acb" }
+binaries_after:
+  - { path: /home/jwils/.local/bin/matrix-overlay, md5: "c9208479c6738c66924c279f0ab9097b", status: NEW }
+  - { path: /usr/local/bin/matrix-overlay, status: STILL_PRESENT, blocked_on: user_sudo }
+removal_method: overwrite_in_place        # cp over the May binary; no backup, per the user's choice
+sudo_removal_command: "sudo rm -v /usr/local/bin/matrix-overlay"
+sudo_blocked_reason: >
+  `sudo -n` reports "a password is required". The agent will not collect or
+  proxy a password, so this step is the user's to run. NOTE: the agent's probe
+  used `-n` (never prompt); the user copied the probe and saw it fail
+  immediately. The command WITHOUT `-n` prompts normally.
+autostart:
+  entry: ~/.config/autostart/matrix-overlay.desktop
+  exec: /home/jwils/.local/bin/matrix-overlay
+  resolves_to_md5: "c9208479c6738c66924c279f0ab9097b"    # the new binary
+  modified: false                                        # entry was already correct
+deployed_run:
+  pid: 1161862
+  exe: /home/jwils/.local/bin/matrix-overlay             # the exact path autostart uses
+  config: ~/.config/matrix-overlay/config.json           # the USER'S real config, unmodified
+  target_fps: 1                                          # field ABSENT -> C-02 serde default, live proof
+  realism: 4
+  glow_passes: 5                                         # user's config, NOT Medium's 3
+  warm_up_s: 300
+m1_deployed:
+  t0_ticks: 1231
+  t1_ticks: 2099
+  window_s: 300.004
+  cpu_pct: 2.8933
+s04_series_all:
+  - { artifact: target/release, cpu_pct: 3.0166 }
+  - { artifact: target/release, cpu_pct: 2.9966 }
+  - { artifact: target/release, cpu_pct: 2.9966 }
+  - { artifact: DEPLOYED,       cpu_pct: 2.8933 }
+s04_mean_all: 2.9758
+s04: AT_GATE                    # unchanged — see note 3; a fourth low window does not retire the exception
+ac5_user_signoff: accepted
+phase_7: SHUT
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"
+```
+
+### Notes
+
+1. **The deployed binary is a rebuild of identical source, not the byte-identical AC5 artifact.**
+   AC5 was signed against md5 `06d676ac…`; the installed binary is `c9208479…`. `git log 02c8a41..HEAD
+   -- src/ Cargo.toml` is **empty**, so the source is unchanged and the difference is build
+   non-determinism. This is recorded rather than glossed: **the artifact the user approved and the
+   artifact now installed are not the same bytes.** Phase 9's own requirement — measure the *deployed*
+   binary rather than trust the earlier numbers — is what covers the gap, and it was measured.
+
+2. **C-02 is proven live, on the user's real file.** `~/.config/matrix-overlay/config.json` contains no
+   `target_fps` key (md5 unchanged all campaign), the new binary loaded it without error, and the
+   deployed run held **1 fps**. The `#[serde(default)]` contract works on a real pre-existing config.
+
+3. **2.8933% does NOT retire the `S04_AT_GATE` exception, and is not being used to.** It is a *fourth*
+   window and the lowest of four (3.0166 / 2.9966 / 2.9966 / 2.8933, mean **2.9758**, spread 0.1233
+   pp). Citing it alone would be exactly the selection the round-10 exception forbids. It is also not
+   a like-for-like sample: this run used the user's config with **5 glow passes**, where Medium
+   specifies 3, so it is a slightly *heavier* configuration that happened to measure lower — which is
+   ambient variance, not an improvement. The status stays `AT_GATE`.
+
+4. **The overlay is left running** (pid 1161862, the deployed path) so the user has the new binary on
+   screen immediately rather than waiting for a reboot.
+
+5. **`~/.config/autostart/x11-monitor-overlay.desktop` remains untouched** — it points at
+   `/usr/local/bin/x11-monitor-overlay`, which does not exist. A dead entry for a different program;
+   outside the scope of "old matrix overlay binaries" and reported to the user rather than acted on.
