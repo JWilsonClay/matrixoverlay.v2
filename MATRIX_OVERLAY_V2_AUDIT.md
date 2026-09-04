@@ -1130,3 +1130,341 @@ Checkable:
 
 Stop. Bring the 2.8 receipt. Do not open Phase 3. Do not jump to Phase 5 code in this commit.
 ```
+
+---
+
+# AGENT PROMPT — Round 8: Close Phase 2, Open Phase 5
+# Campaign: 20260903-matrixoverlay-render-remediation
+# Against: fbcc57d   Branch: refactor/matrixoverlay.v2
+# From: Grok Round 8 adjudication of PHASE_2.8_RECEIPT.md
+# Scope: document-gate rewrite + optional 2.9 footnote + Phase 5 ONLY.
+
+```yaml
+round: 8
+against: fbcc57d
+q1: RETIRE_MRC_AS_GATE          # keep test, label LAB_F1
+q2: OPTIONAL_2_9_FOOTNOTE       # gtk::init + font_options dump; cannot block Phase 5
+q3: PHASE_5_AUTHORIZED
+phase_2: CLOSED_LAB_DIVERGENT
+phase_3: BLOCKED_AND_DEMOTED
+phase_4: BLOCKED_AND_DEMOTED
+phase_5: OPEN
+do_not: [phase_3_source, phase_4_source, atlas, pulse, presets, deploy, retune_AC0_500_900, mutate_user_config]
+```
+
+Do not re-argue PROCESS_CACHE. Do not spend a phase making cargo-test match live.
+Do not pull 605 ms into any Phase 5 number.
+
+---
+
+## 0. Rulings — bind these
+
+```yaml
+Q1:
+  chase_process_cache_as_gate: false
+  reason: >
+    MRC existed to open/block Phase 3. Phase 3 is demoted on an in-process
+    1.25× that needs no MRC. An MRC that cannot reproduce live cost is a
+    lab curiosity, not a campaign instrument. Keeping it as a halt is a
+    Mock Trap of the campaign itself.
+  keep_the_test: true
+  label: LAB_F1
+  meaning: "cargo-test reproduces Pango size-churn; the overlay process does not"
+
+Q2:
+  worth_one_cheap_pass: true
+  block_phase_5: false
+  experiment: 2.9 sidecar — see §2
+  leading_mechanism: >
+    gtk::init() / PangoCairoFontMap / Xft font options in the overlay
+    process vs a bare cargo-test font map. Not merely "SHM vs ImageSurface."
+
+Q3:
+  phase_2_complete_false_blocks_phase_5: false
+  rewrite_the_gate: true
+  phase_2_mission_deliverables: COMPLETE
+    - F2 overlay_cpu fix, verified ±1 pp (AC2 1.8)
+    - fps instrument, verified ±10% (AC3 1.8)
+    - S-13b present_ms per CRTC
+    - Mock Trap deleted
+    - S-13a clear + rain.update (glow still unmeasured — recorded)
+    - live identity closes 19.43 vs 20.64 (6%)
+    - Phase 3 re-entry measured: 1.25 < 3.00
+  x_live_remaining: finding_not_halt
+    # "the cargo-test MRC is not the live path" — now known, not blocking
+  next: Phase 5
+```
+
+Live terms Phase 5 AC6 MUST use. Do not mix MRC milliseconds into them.
+
+```yaml
+live:
+  rain_4k_ms: 9.6220          # run A, 12691 calls; figure of record 10.0030 agrees within 4%
+  rain_1080_ms: 4.2344
+  live_control_4k_ms: 7.3164  # in-process single-size
+  live_over_control_4k: 1.25
+  present_ms_sum: 1.6160
+  ms_per_tick: 20.64
+  fps_now: 30.2
+  m1_cpu_pct: 60.4613
+  s04_at_1fps: 2.06           # 20.64 × 1 / 10
+  s04_gate: 3.0
+  default_target_fps: 1       # 20.64 × fps / 10 < 3 → fps <= 1.45
+```
+
+---
+
+## 1. Standing rules
+
+- Method M-1 only. Never `ps -o pcpu`. Never `pgrep -f`.
+- Launch as TWO statements:
+    cargo build --release || exit 1
+    ./target/release/matrix-overlay & TESTPID=$!
+  Never `cargo run`. Never `cmd && bin &`.
+- C-01: 175-line hard cap. Tick module and config modules included.
+- C-02: `target_fps` MUST have `#[serde(default = "default_target_fps")]`.
+  Existing `~/.config/matrix-overlay/config.json` must parse unchanged.
+- C-05 / pitfalls.md:70-72: 1 Hz is sufficient; no flashing. Default 1 fps follows this.
+- C-06: do not deploy, do not touch autostart, do not kill the user's overlay.
+- R-06: do not let Phase 5 tests measure a path production does not take.
+- `/nodelete` [INTENT] is untouchable.
+- Amend, do not delete, S-nn / R-nn / F-nn. New items continue numbering.
+- F8 (`main.rs` rain_mode clobber), ungated `rain.update`, unmeasured glow: record only. Do not fix.
+
+---
+
+## 2. First commit — gate rewrite + optional 2.9 (no Phase 5 behavior yet)
+
+### 2.1 `implementation-plan.md` + `tasks.md`
+
+```
+§1.9:
+  X-LIVE remaining open is a FINDING: cargo-test MRC ≠ live path.
+  It no longer halts the campaign.
+  New verdict: PHASE_2_CLOSED_LAB_DIVERGENT
+  MRC test stays. Relabel every "validation / S-08 gate / Phase 3 red-before-green"
+  that treated the cargo-test MRC as the live cost. It is LAB_F1.
+
+§1.6 / §2.5 / Phase 2 forward contract:
+  Phase 2 mission deliverables are COMPLETE.
+  Next mission phase is Phase 5.
+  Phases 3–4 remain demoted sequels.
+  Phase 3 re-entry is unchanged: live_rain_4k / live_single_size_4k ≥ 3.0,
+  both in-process. Currently 1.25. Do not reopen.
+
+Phase 2 status banner in tasks.md:
+  STATUS: CLOSED_LAB_DIVERGENT (2026-09-03, fbcc57d + this patch)
+  X-LIVE ratio 60.55 is recorded, not blocking.
+
+Phase 5 AC6:
+  Consume LIVE terms only (block in §0).
+  Identity:
+    cpu_pct ≈ ms_per_tick × target_fps / 10
+    with ms_per_tick = 20.64 measured at 30.2 fps
+  Projection at default 1: 2.06% < 3%.
+  If a later measurement of ms_per_tick at the new rate disagrees by >20%,
+  re-measure rather than trust the 30 fps tick cost at 1 fps
+  (clear + present may not scale perfectly; rain.draw should).
+
+S-01 / S-08:
+  S-01's 20 ms cargo-test gate is no longer a campaign halt.
+  Keep the test as LAB_F1 documentation.
+  S-08 "red before Phase 3" is vacated because Phase 3 is not opening.
+```
+
+### 2.2 Optional 2.9 — one cheap pass, cannot block §3
+
+If this takes more than ~30 minutes, skip and write the pitfalls stub instead.
+
+```text
+E1  In test_rain_frame_cost_mrc, call gtk::init() once at the start.
+    Re-run: cargo test --release --test performance_tests test_rain_frame_cost_mrc -- --nocapture
+    Record mean_ms. If it drops toward ~10: PROCESS_CACHE = fontmap/gtk.
+    If it stays ~600: not gtk::init alone.
+
+E2  From a 15 s MATRIX_OVERLAY_DEBUG_METRICS run, print
+    cairo_surface_get_font_options on the SHM surface.
+    From the MRC, print the same on the standalone ImageSurface.
+    One receipt row. Do not retune the harness to force a match.
+
+E3  Phase 10 pitfalls stub (write the text now, even if E1/E2 skipped):
+    "Pango size-churn costs 74× inside cargo-test and 1.25× inside the
+     overlay process. Leading remaining mechanism: gtk::init() /
+     PangoCairoFontMap / Xft options vs a bare test font map — not glyph
+     volume, not the clip guard, not rain_speed. The cargo-test MRC is a
+     lab reproduction of F1, not a measurement of the live path."
+```
+
+Receipt 2.9 is append-only. `phase_5_blocked_by_2_9: false` in all cases.
+
+---
+
+## 3. Phase 5 — Frame Governor (the mission lever)
+
+Objective: the hardcoded 33 ms tick is why the process is at 60%. Frames already finish in 20.64 ms, so F4 fail-open is latent, not live — but the interval itself is the cost. Add `target_fps`, honor it, project S-04.
+
+### 3.1 Tasks (from the existing Phase 5 list — execute these, nothing else)
+
+```
+5.1  Fix spawn_tick_thread in src/core/threads/mod.rs (~L114-125).
+     Today:
+       let interval = Duration::from_millis(33);
+       if elapsed < interval { sleep(interval - elapsed); }
+       else { sleep(1ms); }          # F4 fail-open
+     Time spent blocked in send() on the bounded(1) channel is counted
+     in elapsed, so a slow frame sleeps 1 ms and immediately re-queues.
+
+5.2  Replace the sleep-accumulator with a monotonic deadline:
+       let period = Duration::from_secs_f64(1.0 / target_fps.max(1) as f64);
+       let mut deadline = Instant::now() + period;
+       loop {
+         // work
+         let now = Instant::now();
+         if now < deadline { sleep(deadline - now); }
+         else { /* skip missed ticks; do not queue catch-up frames */ }
+         deadline += period;
+         if deadline < Instant::now() { deadline = Instant::now() + period; }
+       }
+     Never sleep 1 ms as a fallback. Never fold send() block time into
+     the period math — sample Instant after the send returns.
+
+5.3  Add general.target_fps: u32
+       types.rs:   #[serde(default = "default_target_fps")]
+       defaults.rs: pub fn default_target_fps() -> u32 { 1 }
+     Default is 1, not 10. The pre-audit 10 was a placeholder the budget
+     identity was expected to lower. Live identity lowered it to 1.
+     pitfalls.md:72 already sanctions 1 Hz.
+
+5.4  Clamp on load to 1..=60. Zero must not divide. Absurd must not
+     recreate the runaway.
+
+5.5  Expose target_fps in the GUI General tab using the existing
+     widget / update_config_from_widgets pattern in ui/gui/logic.rs.
+     Do not invent a new tab.
+
+5.6  Unit test: inject a simulated 200 ms frame; assert the next tick
+     is not issued before the configured period. This is S-07 / F4.
+```
+
+### 3.2 Acceptance criteria
+
+```
+AC1  S-07: injected 200 ms frame → tick never re-queues faster than period.
+AC2  Measured fps (Phase 1 instrument) tracks configured target_fps within ±10%
+     on a 60 s direct-binary run at target_fps=1 and at target_fps=5.
+     Use MATRIX_OVERLAY_DEBUG_METRICS=1 exit summary + wall-clock presents.
+     Do not mutate the user's config.json — pass target_fps via a test config
+     copy, an env override if one exists, or a temp XDG_CONFIG_HOME.
+AC3  Clamp: 0 → 1, 9999 → 60, verified by unit test.
+AC4  C-02: user's real config.json (no target_fps field) loads and defaults to 1.
+AC5  HITL — user visual sign-off that 1 fps rain is smooth enough / non-strobing.
+     Mark AC5 BLOCKING_HITL. Do not fake it. Do not skip silently.
+     Record "pending user" if the user is not in the loop this commit.
+AC6  Budget identity, LIVE terms only:
+       cpu_pct ≈ 20.64 × target_fps / 10
+       at default 1 → 2.06% < 3%
+     Then MEASURE with Method M-1 over ≥ 120 s after warm-up (t ≥ 120 s
+     from the 12-min run: CPU rises until streams fill, then flats).
+     Gate: M-1 < 3% of one core at target_fps=1.
+     If M-1 ≥ 3% at 1 fps, do not declare S-04 met and do not invent a
+     Phase 3 re-open to explain it — bring the receipt back.
+```
+
+### 3.3 Pseudocode — tick thread
+
+```rust
+// src/core/threads/mod.rs  — replace the 33 ms block
+fn spawn_tick_thread(..., target_fps: u32, ...) {
+    let fps = target_fps.clamp(1, 60);
+    let period = Duration::from_nanos(1_000_000_000 / fps as u64);
+    thread::spawn(move || {
+        let mut deadline = Instant::now() + period;
+        loop {
+            if shutdown.load(Ordering::Relaxed) { break; }
+            // send must NOT be inside the period measurement
+            let _ = tick_tx.try_send(());      // or send, but timestamp AFTER
+            let now = Instant::now();
+            if now < deadline {
+                thread::sleep(deadline - now);
+            }
+            // skip missed ticks; do not catch up
+            deadline += period;
+            while deadline < Instant::now() {
+                deadline += period;
+            }
+        }
+    });
+}
+```
+
+`target_fps` must be readable by the tick thread. Today the interval is a local `33`.
+Pass it in at spawn from the loaded Config. If config can change at runtime via the GUI,
+the thread needs a way to see the new value (AtomicU32 is enough; do not take the
+SharedMetrics mutex on this path).
+
+### 3.4 What Phase 5 does not do
+
+- Does not touch rain_manager.rs draw loop.
+- Does not bucket fonts, does not build an atlas.
+- Does not implement Pulse Mode, does not remove F8.
+- Does not gate rain.update behind `"fall"` (record only).
+- Does not measure glow (record only).
+- Does not run `scripts/install.sh`, does not copy to `~/.local/bin`.
+- Does not use cargo-test MRC milliseconds in any AC.
+
+---
+
+## 4. Receipt schema — append
+
+```yaml
+# ---- block: phase 2 close ----
+phase: 2
+status: CLOSED_LAB_DIVERGENT
+x_live: { ratio: 60.55, finding_not_halt: true }
+lab_f1: { mrc_ms: 605.684, control_ms: 8.176, ratio: 74 }
+live_f1: { rain_4k_ms: 9.6220, control_4k_ms: 7.3164, ratio: 1.25 }
+phase_3: BLOCKED_AND_DEMOTED
+optional_2_9:
+  gtk_init_mrc_ms: _          # or "skipped"
+  font_options_live: _
+  font_options_mrc: _
+  conclusion: _
+
+# ---- block: phase 5 ----
+phase: 5
+git_sha: _
+target_fps_default: 1
+ac1_governor_holds: _
+ac2:
+  target_1: { wallclock_fps: _, metric_fps: _, m1_cpu_pct: _, window_s: _ }
+  target_5: { wallclock_fps: _, metric_fps: _ }    # tracking only; not an S-04 gate
+ac3_clamp: _
+ac4_old_config_loads: _
+ac5_user_signoff: pending | accepted | rejected
+ac6:
+  projected_pct_at_1: 2.06
+  measured_m1_at_1: _
+  s04: MET | UNMET
+verdict: S04_MET | S04_UNMET_BRING_RECEIPT
+```
+
+---
+
+## 5. Definition of done
+
+- [ ] Plan + tasks rewritten: Phase 2 CLOSED_LAB_DIVERGENT, MRC = LAB_F1, X-LIVE is a finding, Phase 5 next.
+- [ ] Phase 3 re-entry still in-process ≥ 3. Not cargo-test control. Not silently reopened.
+- [ ] Optional 2.9 done or explicitly skipped with the pitfalls stub written.
+- [ ] `target_fps` exists, default 1, clamped 1..=60, `#[serde(default)]`.
+- [ ] Tick honors `target_fps` with a monotonic deadline. F4 1 ms fallback gone.
+- [ ] Unit test covers the 200 ms injection.
+- [ ] User config.json byte-identical; loads; defaults target_fps to 1.
+- [ ] AC2/AC6 live run: direct binary, pinned pid, M-1 at target_fps=1, t0 after warm-up.
+- [ ] AC5 marked pending-user if not signed off. Not forged.
+- [ ] Receipt blocks appended.
+- [ ] C-01: every touched file `wc -l` ≤ 175.
+- [ ] No Phase 3/4 source. No atlas. No Pulse. No deploy.
+- [ ] No 605 ms figure used as a Phase 5 input.
+
+Stop after the Phase 5 receipt. If AC6 M-1 ≥ 3% at 1 fps, stop and bring the receipt — do not open Phase 3 to explain it.
+```

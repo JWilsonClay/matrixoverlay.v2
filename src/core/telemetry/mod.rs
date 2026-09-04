@@ -21,7 +21,7 @@ pub use self::report::summary;
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 /// Total successful presents across all monitors. Read by `FpsCollector`.
@@ -107,6 +107,17 @@ pub fn record_rain_draw(w: u16, h: u16, ns: u64) {
         e.1 = e.1.saturating_add(1);
     }
 }
+
+/// [2.9 probe E2] The live surface's effective Cairo font options, captured
+/// once. Lazily produced so the (allocating) description is never built on a
+/// hot path more than a single time.
+static FONT_OPTIONS: OnceLock<String> = OnceLock::new();
+
+pub fn record_font_options(f: impl FnOnce() -> String) {
+    if FONT_OPTIONS.get().is_none() { let _ = FONT_OPTIONS.set(f()); }
+}
+
+pub fn font_options() -> Option<&'static String> { FONT_OPTIONS.get() }
 
 /// Record surviving `show_layout` calls for one production `rain.draw`.
 pub fn record_survived(w: u16, h: u16, n: u32) {

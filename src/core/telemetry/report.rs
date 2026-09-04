@@ -2,7 +2,7 @@
 //! Formatting for the telemetry summary printed once at exit.
 //! Split out of `mod.rs` to hold both files under the 175-line cap (C-01).
 
-use super::{live_control_snapshot, present_count, rain_draw_snapshot, survived_snapshot, timings_snapshot};
+use super::{font_options, live_control_snapshot, present_count, rain_draw_snapshot, survived_snapshot, timings_snapshot};
 
 fn mean_ms(total_ns: u64, n: u64) -> f64 {
     if n == 0 { 0.0 } else { total_ns as f64 / n as f64 / 1_000_000.0 }
@@ -51,6 +51,10 @@ pub fn summary() -> String {
             let mean = if *n == 0 { 0.0 } else { *sum as f64 / *n as f64 };
             out.push_str(&format!("{:<15} frames={:>8}  survived_show_layout={:>9.1}\n", geom, n, mean));
         }
+    }
+
+    if let Some(fo) = font_options() {
+        out.push_str(&format!("\n=== 2.9-E2 — live Cairo font options ===\n{fo}\n"));
     }
 
     let control = live_control_snapshot();

@@ -114,3 +114,35 @@ fn main() -> Result<()> {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
+
+---
+
+## Pitfall: a `cargo test` benchmark is not a measurement of this program
+
+*(Added 2026-09-03, Render Substrate Remediation campaign, round-8 finding. Stub for the Phase 10
+write-up; the numbers are already final.)*
+
+Pango font-size churn — cycling a distinct `FontDescription` size per rain stream, every frame —
+costs **74×** inside `cargo test` and **1.25×** inside the overlay process. Same function
+(`RainManager::draw`), same geometry, same config literals, same glyph volume:
+
+| | per glyph | vs its own single-size control |
+|---|---|---|
+| `cargo test --release` | 438.66 µs | 74× |
+| overlay process (in-process timing) | 7.42 µs | 1.25× |
+
+**What it is not.** Ruled out by measurement, not by argument: glyph volume (surviving `show_layout`
+counts match within 6% — 1380.8 vs 1297.0), the clip guard, `rain_speed` priming (pinning the live
+0.1 moved the number 1.1%), per-frame surface creation, glyph-cache warm-up, unit errors, and
+cross-test cache pollution. Cairo font options are **identical** on both sides
+(`antialias/hint_style/hint_metrics/subpixel_order` all `Default`). Calling `gtk::init()` in the test
+moves it about 18% — real, but not the mechanism.
+
+**Leading remaining mechanism:** the GTK / `PangoCairoFontMap` / Xft font-map state the overlay
+process holds versus the bare font map a test binary gets. Not SHM-versus-`ImageSurface`.
+
+**The rule this buys you.** A performance test that calls production code with production-shaped
+inputs can still be measuring a different program, because *the process is an input too*. Before
+acting on a benchmark, reconcile it against the same function timed inside the running binary. The
+campaign's MRC satisfied every anti-Mock-Trap rule that was written down and still disagreed with the
+substrate by 59× per glyph. **The in-process measurement is the one that decides.**

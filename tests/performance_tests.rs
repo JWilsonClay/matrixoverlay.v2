@@ -304,6 +304,14 @@ fn report(name: &str, series: &[f64], survived: &[u32], streams: usize, distinct
 /// ratio is below 3.
 #[test]
 fn test_rain_frame_cost_mrc() {
+    // [2.9 probe E1, round-8] The overlay process runs `gtk::init()` before it
+    // ever draws; this one did not. If the 59x per-glyph divergence is the GTK
+    // /`PangoCairoFontMap`/Xft font-map state rather than the surface, this call
+    // alone should collapse the number. Harmless if it does not: `init` is
+    // idempotent and the draw path is untouched.
+    let gtk_ok = gtk::init().is_ok();
+    println!("[2.9-E1] gtk::init() ok={gtk_ok}");
+
     let config = mrc_config();
     let (mut rain, prime_steps) = primed_manager(&config);
     let distinct = {
@@ -312,6 +320,14 @@ fn test_rain_frame_cost_mrc() {
             .collect();
         d.sort_unstable(); d.dedup(); d.len()
     };
+    // [2.9 probe E2] Cairo font options are part of the scaled-font cache key
+    // and of the rasterization cost. Dumped on both sides for comparison; the
+    // harness is NOT tuned to force a match.
+    {
+        let s = ImageSurface::create(Format::ARgb32, 64, 64).unwrap();
+        let c = Context::new(&s).unwrap();
+        println!("[2.9-E2] mrc_font_options: {}", matrix_overlay::render::describe_font_options(&c));
+    }
     let (series, survived) = measure_frames(&mut rain, &config);
     report("MRC", &series, &survived, rain.streams.len(), distinct, prime_steps);
 

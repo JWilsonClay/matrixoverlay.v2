@@ -311,3 +311,51 @@ acceptance:
 9. **One in-scope addition beyond the prompt's changeset:** `Renderer::debug_flags()` resolves the
    three debug env vars **once** via `OnceLock`. The prior code called `env::var_os` on every frame of
    the very path it was measuring. Noted here rather than left silent.
+
+## 2026-09-03 — /execute-build — Phase 2 CLOSE + 2.9 probe (round-8)
+- Phase/Stage: Phase 2 close (`CLOSED_LAB_DIVERGENT`) + optional 2.9 sidecar
+- Grade/Status: PHASE 2 CLOSED — mission deliverables complete; X-LIVE recorded as a finding
+- Files: (none created) | implementation-plan.md, tasks.md, docs/pitfalls.md, Cargo.toml, tests/performance_tests.rs, src/render/mod.rs, src/render/engine/pipeline.rs, src/core/telemetry/mod.rs, src/core/telemetry/report.rs
+- Deviation Log: NONE
+- Commit: see 6b
+
+```yaml
+phase: 2
+status: CLOSED_LAB_DIVERGENT
+x_live: { ratio: 60.55, finding_not_halt: true }
+lab_f1:  { mrc_ms: 605.684, control_ms: 8.176,  ratio: 74 }
+live_f1: { rain_4k_ms: 9.6220, control_4k_ms: 7.3164, ratio: 1.25 }
+phase_3: BLOCKED_AND_DEMOTED
+phase_4: BLOCKED_AND_DEMOTED
+optional_2_9:
+  gtk_init_mrc_ms: 471.426                # also 474.681 / 507.235 across three runs
+  baseline_isolated_no_gtk_ms: 577.911
+  gtk_init_effect: "-18% — real, but not the mechanism"
+  font_options_live: "antialias=Default hint_style=Default hint_metrics=Default subpixel_order=Default"
+  font_options_mrc:  "antialias=Default hint_style=Default hint_metrics=Default subpixel_order=Default"
+  font_options_identical: true            # eliminates the Cairo-font-options mechanism
+  conclusion: >
+    Neither E1 nor E2 explains the divergence. gtk::init() recovers ~18%; font
+    options are byte-identical on both sides. Leading remaining mechanism is the
+    GTK / PangoCairoFontMap / Xft font-map state of the overlay process versus a
+    bare test font map — NOT SHM-vs-ImageSurface, which this pass also failed to
+    implicate. Chased no further per round-8 Q1.
+  pitfalls_stub_written: true             # docs/pitfalls.md, "a cargo test benchmark is not a measurement"
+phase_5_blocked_by_2_9: false
+```
+
+### Findings — Phase 2 close
+
+1. **E2 eliminated the mechanism I had named.** The round-7 receipt put `process_or_shm_vs_standalone`
+   forward with Cairo font options as the concrete suspect. They are **identical** on both sides. The
+   surface class is not implicated either. Recorded as a dead end rather than left implying progress.
+2. **E1 moved the number without explaining it.** `gtk::init()` in the test drops the isolated MRC
+   from 577.911 to ~471-507 ms (~18%). Real, reproducible, and far short of the 59x that would be
+   needed. It supports the font-map hypothesis without confirming it.
+3. **S-01 and S-08 are relabeled, not deleted.** S-01 becomes `LAB_F1` documentation and gates
+   nothing — the live 4K figure (9.6220 ms) is already inside its 20 ms threshold. S-08's
+   red-before/green-after transition is **vacated**, because it presumed a Phase 3 that the
+   in-process 1.25x ratio has demoted. The half of S-08 that was actually delivered — the deleted
+   `test_render_optimization_bench`, the R-06 rule, the labeled control — stands.
+4. **New dev-dependency:** `gtk = "0.16"`, test-only, same version as the main dependency so it is
+   the same crate instance. Added solely for the E1 probe.

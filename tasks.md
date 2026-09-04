@@ -88,7 +88,13 @@ Branch 1 of the plan (§2.5) before continuing.
 
 ## Phase 2: Disarm the Mock Trap
 
-**STATUS: HALTED — `verdict: PROCESS_CACHE` (2026-09-03, after the 2.8 rework). The rework eliminated the leading hypothesis instead of clearing the gate: surviving `show_layout` counts MATCH (MRC 1380.8 vs live 1297.0, ratio 1.065), so glyph volume is not the divergence. The gap is per-glyph — live 7.42 us, MRC 438.66 us, 59x — for the same function on the same inputs. Pinning the live `rain_speed=0.1` moved the MRC 1.1%. Cause class: `process_or_shm_vs_standalone`. X-LIVE still trips at ratio 60.55 (gate 3.0). PHASE 3 IS BLOCKED AND DEMOTED: the in-process re-entry test measures 1.25 against a 3.00 gate. Next mission phase is 5.** — LOE-1 · Resolves MT · Must go RED before Phase 3
+**STATUS: CLOSED_LAB_DIVERGENT (2026-09-03, `fbcc57d` + round-8 patch). Mission deliverables COMPLETE: the F2 `overlay_cpu` fix (verified ±1 pp), the `fps` instrument (±10%), S-13b `present_ms` per CRTC, the deleted Mock Trap, S-13a `clear` + `rain.update`, a live identity that closes within 6%, and the in-process Phase 3 re-entry measurement (1.25 vs a 3.00 gate). X-LIVE ratio **60.55 is recorded as a FINDING, not a halt** — "the cargo-test MRC is not the live path." The MRC is relabeled `LAB_F1` and gates nothing; `phase_2_complete: false` does not block downstream work. NEXT MISSION PHASE IS 5. PHASES 3-4 REMAIN BLOCKED AND DEMOTED.**
+
+<details><summary>Prior status (round-7, superseded)</summary>
+
+`verdict: PROCESS_CACHE` (2026-09-03, after the 2.8 rework). The rework eliminated the leading hypothesis instead of clearing the gate: surviving `show_layout` counts MATCH (MRC 1380.8 vs live 1297.0, ratio 1.065), so glyph volume is not the divergence. The gap is per-glyph — live 7.42 us, MRC 438.66 us, 59x — for the same function on the same inputs. Pinning the live `rain_speed=0.1` moved the MRC 1.1%. Cause class: `process_or_shm_vs_standalone`. X-LIVE still trips at ratio 60.55 (gate 3.0). PHASE 3 IS BLOCKED AND DEMOTED: the in-process re-entry test measures 1.25 against a 3.00 gate. Next mission phase is 5.
+
+</details> — LOE-1 · Resolves MT · Must go RED before Phase 3
 
 ### Objective
 Replace the test that stood guard over F1 while measuring the one code path production never takes.

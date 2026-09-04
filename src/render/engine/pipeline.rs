@@ -63,6 +63,8 @@ impl Renderer {
     /// env lookup.
     fn draw_rain_timed(&mut self, cr: &CairoContext, config: &Config) -> Result<()> {
         let (dbg, glyphs, control) = Self::debug_flags();
+        if dbg { crate::core::telemetry::record_font_options(
+            || crate::render::describe_font_options(cr)); }
         let (w, h) = (self.width as f64, self.height as f64);
         let (gw, gh) = (self.width as u16, self.height as u16);
         let fc = *self.frames.borrow();
