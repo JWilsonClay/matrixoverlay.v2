@@ -6,7 +6,7 @@ use gtk::{Box, Label, ComboBoxText, SpinButton, CheckButton};
 use crate::core::config::Config;
 
 /// [HARDENED] Builds the general configuration view with strictly bounded inputs.
-pub fn build(vbox: &Box, config: &Config) -> (ComboBoxText, SpinButton, SpinButton, SpinButton, SpinButton, SpinButton, ComboBoxText, SpinButton, CheckButton, CheckButton, ComboBoxText) {
+pub fn build(vbox: &Box, config: &Config) -> (ComboBoxText, SpinButton, SpinButton, SpinButton, SpinButton, SpinButton, ComboBoxText, SpinButton, CheckButton, CheckButton, ComboBoxText, SpinButton) {
     vbox.set_border_width(10);
     
     vbox.pack_start(&Label::new(Some("Theme")), false, false, 0);
@@ -70,5 +70,12 @@ pub fn build(vbox: &Box, config: &Config) -> (ComboBoxText, SpinButton, SpinButt
     temp_unit_combo.set_active_id(Some(&config.general.temp_unit));
     vbox.pack_start(&temp_unit_combo, false, false, 0);
 
-    (theme_combo, font_spin, metric_font_spin, spacing_spin, label_spacing_spin, columns_spin, align_combo, update_spin, check_monitor_label, check_cpu_metric, temp_unit_combo)
+    // [Phase 5.5] Render rate. Range mirrors `General::fps()`'s 1..=60 clamp, so
+    // the widget cannot produce a value the loader would silently change.
+    vbox.pack_start(&Label::new(Some("Render Rate (fps, 1-60 — 1 is sufficient)")), false, false, 0);
+    let fps_spin = SpinButton::with_range(1.0, 60.0, 1.0);
+    fps_spin.set_value(config.general.fps() as f64);
+    vbox.pack_start(&fps_spin, false, false, 0);
+
+    (theme_combo, font_spin, metric_font_spin, spacing_spin, label_spacing_spin, columns_spin, align_combo, update_spin, check_monitor_label, check_cpu_metric, temp_unit_combo, fps_spin)
 }

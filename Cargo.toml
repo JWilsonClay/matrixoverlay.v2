@@ -37,6 +37,7 @@ default = ["weather"]
 weather = ["tokio", "reqwest"]
 
 [dev-dependencies]
+serde_json = "1.0"
 # [2.9 probe, round-8] Test-only. Lets the MRC call `gtk::init()` so the
 # cargo-test process holds the same GTK/Pango font-map state the overlay does.
 # Same version as the main dependency, so it is the same crate instance.

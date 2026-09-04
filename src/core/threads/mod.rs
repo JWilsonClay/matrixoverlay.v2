@@ -3,7 +3,7 @@ pub mod handlers;
 
 use std::thread;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use crossbeam_channel::{Sender, Receiver, select, bounded};
 use tray_icon::menu::MenuEvent;
@@ -79,7 +79,8 @@ pub fn spawn_overlay_thread(
         }
         
         let (tick_tx, tick_rx) = bounded(1);
-        spawn_tick_thread(tick_tx, Arc::clone(&shutdown));
+        let target_fps = Arc::new(AtomicU32::new(current_config.general.fps()));
+        spawn_tick_thread(tick_tx, Arc::clone(&shutdown), Arc::clone(&target_fps));
 
         let key_w = find_keycode(&conn, 0x0077).unwrap_or(Some(0)).unwrap_or(0);
         let key_q = find_keycode(&conn, 0x0071).unwrap_or(Some(0)).unwrap_or(0);
@@ -106,20 +107,54 @@ pub fn spawn_overlay_thread(
                 recv(gui_rx) -> res => if let Ok(ev) = res { handle_gui_event(&conn, ev, &mut current_config, &mut renderers, &metrics_tx); },
                 recv(update_rx) -> res => if let Ok(ev) = res { handle_update_event(ev, &control_tx, &mut latest_version); }
             }
+            // The GUI and tray both mutate `current_config` in place, so publish
+            // the (clamped) rate after every event rather than only on the GUI
+            // arm. One relaxed store per event; nothing on the render path.
+            target_fps.store(current_config.general.fps(), Ordering::Relaxed);
         }
         let _ = wm.cleanup(&conn);
     });
 }
 
-fn spawn_tick_thread(tx: Sender<()>, shutdown: Arc<AtomicBool>) {
+/// Nanoseconds per tick for a clamped rate. Split out so the governor's timing
+/// rule is unit-testable without spawning a thread (S-07 / AC1).
+pub fn tick_period(target_fps: u32) -> Duration {
+    Duration::from_nanos(1_000_000_000 / target_fps.clamp(1, 60) as u64)
+}
+
+/// The next deadline after `now`, given the previous one.
+///
+/// **This is the F4 fix.** The old loop measured `elapsed` across the blocking
+/// `send()` on a `bounded(1)` channel: a slow frame made the receiver late, the
+/// send blocked, `elapsed` exceeded the interval, and the thread slept **1 ms**
+/// and immediately re-queued — a fail-open that ran the loop as fast as the
+/// renderer could drain it, precisely when it was already too slow. A monotonic
+/// deadline cannot fail open: missed ticks are **skipped, never queued as
+/// catch-up frames**, so lateness can only ever cost frames, not add them.
+pub fn next_deadline(prev: Instant, now: Instant, period: Duration) -> Instant {
+    let mut d = prev + period;
+    while d <= now { d += period; }
+    d
+}
+
+fn spawn_tick_thread(tx: Sender<()>, shutdown: Arc<AtomicBool>, target_fps: Arc<AtomicU32>) {
     thread::spawn(move || {
-        let interval = Duration::from_millis(33); 
+        let mut period = tick_period(target_fps.load(Ordering::Relaxed));
+        let mut deadline = Instant::now() + period;
         while !shutdown.load(Ordering::SeqCst) {
-            let start = Instant::now();
             if tx.send(()).is_err() { break; }
-            let elapsed = start.elapsed();
-            if elapsed < interval { thread::sleep(interval - elapsed); }
-            else { thread::sleep(Duration::from_millis(1)); }
+            // Sample AFTER the send returns: time spent blocked on the bounded
+            // channel is the renderer being late, and must not be folded into
+            // the period arithmetic. That fold is what made the old loop
+            // fail open.
+            let now = Instant::now();
+            if now < deadline { thread::sleep(deadline - now); }
+            // Re-read each tick so the GUI can retune the rate live without a
+            // restart. Relaxed is sufficient: a tick either side of the change
+            // is immaterial, and this path must never take the metrics mutex.
+            let next_period = tick_period(target_fps.load(Ordering::Relaxed));
+            if next_period != period { period = next_period; deadline = Instant::now(); }
+            deadline = next_deadline(deadline, Instant::now(), period);
         }
     });
 }

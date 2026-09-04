@@ -22,6 +22,9 @@ pub fn default_rain_mode() -> String { "fall".to_string() }
 pub fn default_realism() -> u32 { 10 }
 pub fn default_true() -> bool { true }
 pub fn default_interval() -> u64 { 30 }
+/// See `General::target_fps`. **1, not 10** — derived from the measured live
+/// identity (20.64 ms/tick), not from the pre-audit placeholder.
+pub fn default_target_fps() -> u32 { 1 }
 pub fn default_max_files() -> usize { 5 }
 pub fn default_max_size() -> u64 { 1 }
 

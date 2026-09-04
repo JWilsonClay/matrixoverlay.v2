@@ -4,7 +4,7 @@ use super::metrics;
 
 pub fn update_config_from_widgets(
     new_config: &mut Config,
-    gen_w: &(gtk::ComboBoxText, gtk::SpinButton, gtk::SpinButton, gtk::SpinButton, gtk::SpinButton, gtk::SpinButton, gtk::ComboBoxText, gtk::SpinButton, gtk::CheckButton, gtk::CheckButton, gtk::ComboBoxText),
+    gen_w: &(gtk::ComboBoxText, gtk::SpinButton, gtk::SpinButton, gtk::SpinButton, gtk::SpinButton, gtk::SpinButton, gtk::ComboBoxText, gtk::SpinButton, gtk::CheckButton, gtk::CheckButton, gtk::ComboBoxText, gtk::SpinButton),
     cos_w: &(gtk::SpinButton, gtk::SpinButton, gtk::SpinButton, gtk::SpinButton, gtk::SpinButton, gtk::CheckButton, gtk::CheckButton),
     weath_w: &(gtk::CheckButton, gtk::CheckButton, gtk::SpinButton, gtk::SpinButton),
 ) {
@@ -21,6 +21,7 @@ pub fn update_config_from_widgets(
     new_config.general.show_monitor_label = gen_w.8.is_active();
     new_config.general.show_cpu_metric = gen_w.9.is_active();
     if let Some(id) = gen_w.10.active_id() { new_config.general.temp_unit = id.to_string(); }
+    new_config.general.target_fps = gen_w.11.value() as u32;
 
     // Cosmetics
     new_config.cosmetics.rain_speed = cos_w.0.value();

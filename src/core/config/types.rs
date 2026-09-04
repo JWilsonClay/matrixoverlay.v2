@@ -30,6 +30,23 @@ pub struct General {
     pub show_cpu_metric: bool,
     #[serde(default = "default_temp_unit")]
     pub temp_unit: String,
+    /// Render loop rate. **C-02: `#[serde(default)]` is mandatory** — an existing
+    /// `config.json` written before this field existed must still parse under
+    /// `deny_unknown_fields`.
+    ///
+    /// Default is **1**, not the placeholder 10 that Phase 5 was drafted with.
+    /// The live budget identity (`ms_per_tick` 20.64, measured) permits at most
+    /// 1.45 fps under the 3% S-04 gate, and `docs/pitfalls.md` already sanctions
+    /// 1 Hz. Read through [`General::fps`], never directly — the raw field is
+    /// unclamped user input.
+    #[serde(default = "default_target_fps")]
+    pub target_fps: u32,
+}
+
+impl General {
+    /// `target_fps` clamped to the sane band. Zero must not divide; an absurd
+    /// value must not recreate the 33 ms runaway this phase exists to remove.
+    pub fn fps(&self) -> u32 { self.target_fps.clamp(1, 60) }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

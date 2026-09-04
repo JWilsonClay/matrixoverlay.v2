@@ -175,6 +175,24 @@ that Phase 1 already starts for AC2/AC3, where the connection is real — `cargo
 
 Both halves are **measured before Phase 5 closes**. Phase 5 AC6 carries no estimate escape hatch.
 
+### Round-8 correction — the identity was missing a third term
+
+Phase 5 measured M-1 at **3.0166%** with `target_fps = 1` where the two-line identity projected
+**2.06%**. The render half was right: **1.943%** measured against a 20.64 ms/tick projection, inside
+6%. What the identity had **no term for** is a floor of **~1.07%** that does not scale with `fps` at
+all — the metrics collectors on the 2 s `update_ms` cycle (the `nvidia-smi` subprocess among them),
+the GTK/tray thread, and the XCB event thread.
+
+```
+cpu_pct ≈ (rain_ms + cairo_rest_ms) × fps × monitors ÷ 10
+        + (present_ms_hdmi + present_ms_edp) × fps ÷ 10
+        + floor_pct                    <- frame-rate INDEPENDENT; measured 1.07% on this host
+```
+
+**Lowering `target_fps` cannot reduce `floor_pct`.** Any projection that omits it promises a number
+the process cannot reach, and at a 3% gate a 1% floor is a third of the entire budget. It must be
+measured — M-1 minus the summed render terms at a known rate — never assumed.
+
 **This identity is why S-01…S-08 can all pass while S-04 fails.** Worked example with the *written*
 gates: S-02's 8 ms ceiling × Phase 5's proposed default of 10 fps = 80 ms/s = **8% of one core for the
 4K rain draw alone** — before `rest_ms`, before the second monitor. Any phase that sets a frame rate

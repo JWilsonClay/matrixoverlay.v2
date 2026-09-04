@@ -242,7 +242,7 @@ drawn — Phase 5's domain.
 
 ## Phase 5: Frame Governor
 
-**STATUS: NOT STARTED** — LOE-3 · Resolves F4 · Aligns with [docs/pitfalls.md:72](docs/pitfalls.md)
+**STATUS: TASKS COMPLETE — AC6 UNMET by 0.017 pp (M-1 3.0166% vs the 3.0% gate). `verdict: S04_UNMET_BRING_RECEIPT`. The governor works and tracks (0.995 fps at target 1, 4.934 at 5); `target_fps` defaults to 1, clamps 1..=60, and old configs still load. The miss is NOT the render term — that measured 1.943%, matching the projection within 6% — it is a ~1.07% frame-rate-independent floor (metrics collectors incl. the nvidia-smi subprocess, GTK/tray, XCB thread) that the §1.3 budget identity has no term for. AC5 pending user sign-off. Phase 3 NOT reopened.**
 
 ### Objective
 Fix the frame cap that fails open under load, and bring the refresh rate in line with the documented
@@ -268,6 +268,7 @@ refresh guidance: *"1Hz or 0.5Hz is sufficient. Avoid 60fps animations."* — [d
   ```
   cpu_pct ≈ (rain_ms + cairo_rest_ms) × fps × monitors ÷ 10     <- per-surface work
           + (present_ms_hdmi + present_ms_edp) × fps ÷ 10        <- already per-CRTC, do NOT × monitors
+          + floor_pct                                            <- ROUND-8: frame-rate INDEPENDENT, measured 1.07%
   ```
   **Round-4 correction:** the earlier single-line form multiplied a summed per-CRTC `present_ms` by `monitors`, counting every present twice. `cairo_rest_ms` is one-surface and scales by `monitors`; `present_ms_*` are per-CRTC, summed, and scale by `fps` alone. **Every term is a measured number by the time this phase runs** — `rain_ms` from the Phase 3/4 MRC, `cairo_rest_ms` from S-13a (task 2.6b), `present_ms` per CRTC from S-13b (task 1.7). The result must project **under 3%**. **Round-2 audit: the earlier "or a recorded estimate otherwise" clause is deleted** — a gate satisfiable by an unmeasured number is Hallucinated Success under a new name, and it is the exact defect class this audit exists to remove. Worked counter-example from the pre-audit draft: S-02's 8 ms ceiling × the proposed default of 10 fps = 8% of one core on the 4K panel alone, before `rest_ms` and before the second monitor — every written gate green, S-04 failed. If the projection exceeds 3%, **lower the default `target_fps` here** (plan §2.5 branch); do not defer the problem to the optional Phase 6.
 

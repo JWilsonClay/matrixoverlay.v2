@@ -359,3 +359,90 @@ phase_5_blocked_by_2_9: false
    `test_render_optimization_bench`, the R-06 rule, the labeled control — stands.
 4. **New dev-dependency:** `gtk = "0.16"`, test-only, same version as the main dependency so it is
    the same crate instance. Added solely for the E1 probe.
+
+## 2026-09-03 — /execute-build — Phase 5: Frame Governor
+- Phase/Stage: Phase 5 — Frame Governor (LOE-3, the mission lever)
+- Grade/Status: **TASKS COMPLETE — AC6 UNMET by 0.017 pp. `verdict: S04_UNMET_BRING_RECEIPT`.** AC5 pending user.
+- Files: tests/governor_tests.rs | src/core/threads/mod.rs, src/core/config/types.rs, src/core/config/defaults.rs, src/core/config/mod.rs, src/ui/gui/general.rs, src/ui/gui/logic.rs, Cargo.toml
+- Deviation Log: NONE
+- Commit: see 6b
+
+```yaml
+phase: 5
+git_sha_base: "1b6745b"
+target_fps_default: 1
+ac1_governor_holds: true          # rate assertion; red-before-green verified (see finding 1)
+ac2:
+  target_1:
+    wallclock_fps: 0.995          # 601 presents/CRTC over ~604 s runtime
+    metric_fps_mean: 1.009        # 150 samples in the M-1 window
+    delta_vs_target_pct: +0.9     # gate +/-10 -> MET
+    m1_cpu_pct: 3.0166
+    window_s: 300.0072
+  target_5:
+    wallclock_fps: 4.934          # 1500 presents/CRTC over ~304 s runtime
+    metric_fps_mean: 4.997        # 70 samples
+    delta_vs_target_pct: -1.3     # gate +/-10 -> MET
+    m1_cpu_pct: 11.9795           # tracking only; not an S-04 gate
+    window_s: 150.0057
+ac3_clamp: true                   # 0 -> 1, 9999 -> 60, unit-tested on General::fps and tick_period
+ac4_old_config_loads: true        # pre-target_fps JSON parses under deny_unknown_fields, defaults to 1
+ac5_user_signoff: pending         # BLOCKING_HITL — not forged, not skipped
+ac6:
+  projected_pct_at_1: 2.06        # from ms_per_tick 20.64 measured at 30 fps
+  measured_m1_at_1: 3.0166
+  s04: UNMET                      # gate 3.0 — missed by 0.017 pp (0.55% relative)
+decomposition_at_1_fps:
+  rain_draw_4k_ms: 10.5461        # 601 calls
+  rain_draw_1080_ms: 5.6787
+  present_summed_ms: 3.2100
+  measured_subtotal_ms: 19.4348   # -> 1.943% at 1 fps
+  non_render_floor_pct: 1.073     # 3.0166 - 1.943
+  unmeasured_in_subtotal: "clear x2 (~3.29 ms, S-13a) and the metrics glow (never measured)"
+verdict: S04_UNMET_BRING_RECEIPT
+phase_3: BLOCKED_AND_DEMOTED      # not reopened, not used to explain the miss
+config_json_md5: "4747e9c8a1bb239170f3a446d083a4e6"   # user's config untouched
+tests: { lib: 6 pass, asd_tests: 5 pass, governor_tests: 6 pass, metrics_tests: excluded (MT-3, never compiled) }
+line_caps: { threads/mod: 160, config/types: 161, config/mod: 120, gui/general: 81, gui/logic: 40, config/defaults: 40 }
+```
+
+### Findings — Phase 5
+
+1. **The first S-07 test was a Mock Trap and was caught by the red-check, not by review.**
+   It asserted one step — that the next deadline lands after the slow frame and within one period of
+   it. Reinstating a deliberately fail-open `next_deadline` (`now + 1ms`) **passed all six tests**,
+   because a 1 ms tick also satisfies both conditions. F4's signature is not one early tick; it is an
+   **unbounded issue rate under load**. The test was rewritten to drive 20 overrunning frames and
+   assert the achieved rate. Re-running the fail-open version now fails with
+   `fps=1: 20 frames took 4.8s, under the 19s the rate allows`. Green restored after. This is the
+   third time in this campaign a test written to prevent a defect class reproduced it.
+
+2. **The governor holds and tracks.** 0.995 fps at `target_fps=1` and 4.934 at 5 — both inside +/-10%
+   on wall-clock presents, and the on-screen metric agrees (1.009, 4.997). The 1 ms fail-open branch
+   is gone; missed ticks are skipped rather than queued.
+
+3. **S-04 is missed by 0.017 pp — and the render term is not why.** The 2.06% projection came from
+   `ms_per_tick = 20.64` measured at 30 fps. At 1 fps the measured render subtotal is **19.43 ms**
+   (1.943%) — the projection's render half was right within 6%. What the budget identity has **no term
+   for** is a **non-render floor of ~1.07%**: metrics collectors on the 2 s `update_ms` (including the
+   `nvidia-smi` subprocess), the GTK/tray thread, and the XCB event thread. Every one of those is
+   frame-rate-independent, so lowering `target_fps` further cannot remove it.
+
+4. **The identity closes almost exactly.** 1.943% render + 1.073% floor = 3.016% against M-1's
+   3.0166%. The gap is not measurement noise, and it is not somewhere unknown.
+
+5. **Two known-open items sit inside the residual.** The metrics glow
+   ([drawing.rs:27-39](src/render/layout/drawing.rs#L27-L39), six `show_layout` calls per metric per
+   frame) has never been measured — S-13a recorded `clear` and `rain.update` only. `clear` itself is
+   ~3.29 ms/tick across both surfaces and is absent from the subtotal above. Either could account for
+   the miss; neither was chased in this pass.
+
+6. **Phase 3 was not reopened to explain the miss**, per the round-8 instruction. Rain at 1 fps costs
+   1.62% of the 3.0166% and the in-process re-entry ratio is still 1.25 against a 3.00 gate.
+
+7. **Recorded, not fixed (unchanged):** F8 (`main.rs` clobbers `rain_mode`), `rain.update` outside the
+   `"fall"` gate, the unmeasured glow.
+
+8. **`tests/metrics_tests.rs` still does not compile** (`NvidiaSmiCollector::new_with_command` does not
+   exist) — the pre-existing MT-3 finding, excluded from the phase gate as Phase 2 AC3 specifies. Not
+   introduced here.
